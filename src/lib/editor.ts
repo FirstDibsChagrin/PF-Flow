@@ -227,7 +227,9 @@ export class FlowEditor {
   }
 
   // ---------- responding in the same row ----------
-  private provisional = new Set<string>();
+  // provisional cells: 'new' = created by a click (deleted if left blank),
+  // 'fill' = a placeholder you clicked into (turned back into a placeholder if left blank)
+  private provisional = new Map<string, 'new' | 'fill'>();
 
   /**
    * Start typing directly to the right of an argument (same row, next column).
@@ -238,19 +240,62 @@ export class FlowEditor {
     this.doc.transact(() => {
       nid = this.addChild(id);
     }, PROVISIONAL);
-    if (nid) this.provisional.add(nid);
+    if (nid) this.provisional.set(nid, 'new');
+    return nid;
+  }
+
+  /** Start a response in any column `col` to the right of `id`, in the same row (placeholders fill the gap). */
+  respondAt(id: string, col: number): string | null {
+    const n = getNode(this.doc, id);
+    if (!n) return null;
+    const lvl = levelOf(this.doc, id);
+    if (col <= lvl || col >= this.ncols(id)) return null;
+    let nid = '';
+    this.doc.transact(() => {
+      let parent = id;
+      for (let l = lvl + 1; l < col; l++) parent = insertCell(this.doc, parent, 1e9, { empty: true });
+      nid = insertCell(this.doc, parent, 1e9);
+    }, PROVISIONAL);
+    this.provisional.set(nid, 'new');
+    this.setFocus(nid);
+    return nid;
+  }
+
+  /** Type into a blank placeholder cell (a column that was skipped in this row). */
+  fillPlaceholder(id: string) {
+    const n = getNode(this.doc, id);
+    if (!n?.get('empty')) return;
+    this.doc.transact(() => n.delete('empty'), PROVISIONAL);
+    this.provisional.set(id, 'fill');
+    this.setFocus(id);
+  }
+
+  /** New argument starting in any column, as a new row at the bottom of the sheet. */
+  startInColumn(sheet: string, col: number): string {
+    let nid = '';
+    this.doc.transact(() => {
+      let parent = rootOf(sheet);
+      for (let l = 0; l < col; l++) parent = insertCell(this.doc, parent, 1e9, { empty: true });
+      nid = insertCell(this.doc, parent, 1e9);
+    }, PROVISIONAL);
+    this.provisional.set(nid, 'new');
+    this.setFocus(nid);
     return nid;
   }
 
   private cleanupProvisional(keep: string | null) {
     if (!this.provisional.size) return;
-    for (const id of [...this.provisional]) {
+    for (const [id, kind] of [...this.provisional]) {
       if (id === keep) continue;
       this.provisional.delete(id);
       const n = getNode(this.doc, id);
       if (!n) continue;
-      const blank = (n.get('text') as Y.Text).length === 0 && !n.get('mark') && liveChildren(this.doc, id).length === 0;
-      if (!blank) continue;
+      const textless = (n.get('text') as Y.Text).length === 0 && !n.get('mark');
+      if (kind === 'fill') {
+        if (textless) this.doc.transact(() => n.set('empty', true), PROVISIONAL);
+        continue;
+      }
+      if (!textless || liveChildren(this.doc, id).length > 0) continue;
       this.doc.transact(() => {
         let parent = this.parentOf(id);
         deleteCell(this.doc, id);

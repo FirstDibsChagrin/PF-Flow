@@ -65,7 +65,11 @@ npm run preview              # http://localhost:4173
   * Second team's sheet: Const → both Rebuttals → Summaries → Final Focuses (7 columns).
   * Extra tabs: all 8 speeches in speaking order. No crossfire columns.
   * Switching mode keeps every cell in its column position. If a sheet loses a column, cells in it are hidden (not deleted) until you switch back, and you're warned first.
-* **Responding in the same row:** click the empty space directly to the right of any argument (or press → in it) and start typing. If you leave without typing, the empty cell disappears.
+* **Write anywhere:** click any empty spot in the grid and start typing. Whatever you write stays in the row of the argument it answers.
+  * Any empty column to the right of an argument starts a response there. If you skip columns, they stay blank, and you can click them later to fill them in.
+  * The empty area at the bottom has a spot in every column, for starting a new argument in any column (for example, a Con off-case that begins in the rebuttal column).
+  * Pressing → in an argument with no response yet also starts one.
+  * If you click and leave without typing, nothing is left behind.
 * **Cells** work like Flower. A cell's responses sit in the next column on the same row, so a whole argument chain lines up horizontally.
 * **Marks:** dropped (red, struck through), extended (green), and turned (purple). Use Alt+1/2/3, or right-click a cell.
 * **Templates** are personal (on your dashboard). Build one in the Templates tab, or click **Save as template** in any flow. Start a flow from a template in the New flow dialog or with a template's **New flow from this** button. The copy is independent of the template. A template used in the other mode keeps column positions, so constructives stay in column 1.
@@ -98,9 +102,9 @@ npm run preview              # http://localhost:4173
 | Alt+↵ | Go to the previous sibling, or create a new cell above if there is none |
 | Alt+Shift+↵ | Respond to the next argument |
 | Mod+E | Extend: carry the argument into the next column with an → cell |
-| Click the empty space right of a cell | Type a response in that same row |
+| Click any empty spot | Write there; it stays in that argument's row |
 | Click a line between cells | Insert there |
-| **+** on a column header | Start a new argument in that column |
+| Bottom row of any column (or **+** on a column header) | Start a new argument in that column |
 
 **Edit and mark**
 

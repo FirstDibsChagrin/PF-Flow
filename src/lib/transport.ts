@@ -31,8 +31,25 @@ export interface Transport {
   channel(name: string, presenceKey: string, h: ChannelHandlers): Channel;
 }
 
-const URL_ = import.meta.env.VITE_SUPABASE_URL as string | undefined;
-const KEY = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined;
+// This app's Supabase project. Both values are public by design (access is enforced by
+// room-code RPCs), so they double as defaults when the env vars are missing or mistyped.
+const DEFAULT_URL = 'https://mlfarkjibpcnxcfozbly.supabase.co';
+const DEFAULT_KEY = 'sb_publishable_dFTa0JJZmh1xmsx6pgiewA_R1Y1m57x';
+
+const clean = (v: unknown) => (typeof v === 'string' ? v.trim().replace(/^['"]+|['"]+$/g, '').trim() : '');
+
+/** Accepts sloppy values ("ttps://x.supabase.co/", " x.supabase.co", quoted) and returns https://<ref>.supabase.co */
+function normalizeUrl(raw: unknown): string | undefined {
+  const v = clean(raw);
+  if (!v) return undefined;
+  const ref = v.match(/([a-z0-9]{20})\.supabase\.(co|in)/i);
+  if (ref) return `https://${ref[1].toLowerCase()}.supabase.${ref[2]}`;
+  const fixed = v.replace(/^[a-z]*:\/\//i, '').replace(/\/+$/, '');
+  return fixed ? `https://${fixed}` : undefined;
+}
+
+const URL_ = normalizeUrl(import.meta.env.VITE_SUPABASE_URL) ?? DEFAULT_URL;
+const KEY = clean(import.meta.env.VITE_SUPABASE_ANON_KEY) || DEFAULT_KEY;
 
 function withTimeout<T>(p: PromiseLike<T>, ms = 8000): Promise<T> {
   return new Promise((res, rej) => {
@@ -85,6 +102,16 @@ class SupabaseTransport implements Transport {
   }
 
   channel(name: string, presenceKey: string, h: ChannelHandlers): Channel {
+    try {
+      return this.openChannel(name, presenceKey, h);
+    } catch (e) {
+      console.error('[pf] realtime unavailable', e);
+      setTimeout(() => h.onStatus('disconnected'), 0);
+      return { send: async () => false, track: () => {}, close: () => {} };
+    }
+  }
+
+  private openChannel(name: string, presenceKey: string, h: ChannelHandlers): Channel {
     let ch: RealtimeChannel | null = this.sb.channel(name, {
       config: { broadcast: { self: false, ack: false }, presence: { key: presenceKey } },
     });
@@ -238,8 +265,14 @@ class LocalTransport implements Transport {
   }
 }
 
-export const transport: Transport =
-  URL_ && KEY ? new SupabaseTransport(URL_, KEY) : new LocalTransport();
+export const transport: Transport = (() => {
+  try {
+    return new SupabaseTransport(URL_, KEY);
+  } catch (e) {
+    console.error('[pf] backend config invalid; local-only mode', e);
+    return new LocalTransport();
+  }
+})();
 
 // Server clock offset so synced timers agree across machines.
 export let serverOffset = 0;

@@ -61,29 +61,36 @@ export function Sheet({ editor, sheet, presence }: { editor: FlowEditor; sheet: 
           )}
         </div>
         {/* rows */}
-        <div className="relative pb-2">
+        <div className="relative">
           {rootIds.map((id, i) => (
             <div key={id} className={cls('relative', i > 0 && 'border-t bd')} style={{ width: total }}>
               <NodeView id={id} level={0} ctx={ctx} />
             </div>
           ))}
         </div>
-        <div
-          className="group relative flex min-h-[40vh] cursor-text items-start"
-          onMouseDown={(e) => {
-            if (e.target === e.currentTarget) {
-              e.preventDefault();
-              editor.addRow(sheet);
-            }
-          }}
-        >
-          <button
-            className="btn t3 ml-1 mt-1 opacity-60 transition-opacity group-hover:opacity-100"
-            onMouseDown={(e) => e.preventDefault()}
-            onClick={() => editor.addRow(sheet)}
-          >
-            <Icon.plus s={14} /> New argument
-          </button>
+        <div className={cls('flex min-h-[40vh] items-stretch', rootIds.length > 0 && 'border-t bd')} data-testid="new-row">
+          {columns.map((c, i) =>
+            widths[i] ? (
+              <div key={c.key} className="flex shrink-0 flex-col" style={{ width: widths[i] }}>
+                <Slot
+                  width={widths[i]}
+                  label={i === 0 ? '+ New argument' : `+ New in ${c.short}`}
+                  title={`Start a new argument in ${c.label}`}
+                  onClick={() => (i === 0 ? editor.addRow(sheet) : editor.startInColumn(sheet, i))}
+                  testid={`new-${i}`}
+                  hint={i === 0}
+                />
+                <div
+                  className="flex-1 cursor-text"
+                  onMouseDown={(e) => {
+                    e.preventDefault();
+                    if (i === 0) editor.addRow(sheet);
+                    else editor.startInColumn(sheet, i);
+                  }}
+                />
+              </div>
+            ) : null,
+          )}
         </div>
       </div>
       {menu && <CellMenu ctx={ctx} {...menu} onClose={() => menuStore.set(null)} />}
@@ -139,9 +146,13 @@ const NodeView = memo(function NodeView({ id, level, ctx }: { id: string; level:
   const empty = !!n.get('empty');
   return (
     <div className="flex items-start">
-      <div className="shrink-0 overflow-hidden" style={{ width }}>
-        {empty || width === 0 ? <div style={{ height: empty ? 4 : 0 }} /> : <Cell id={id} n={n} level={level} ctx={ctx} />}
-      </div>
+      {empty && width > 0 ? (
+        <Slot width={width} label="+ add" title="Click to write in this column" onClick={() => ctx.editor.fillPlaceholder(id)} testid={'fill-' + level} />
+      ) : (
+        <div className="shrink-0 overflow-hidden" style={{ width }}>
+          {width === 0 ? null : <Cell id={id} n={n} level={level} ctx={ctx} />}
+        </div>
+      )}
       {childIds.length > 0 ? (
         <div className="flex flex-col">
           {childIds.map((c) => (
@@ -149,36 +160,52 @@ const NodeView = memo(function NodeView({ id, level, ctx }: { id: string; level:
           ))}
         </div>
       ) : (
-        !empty &&
-        width > 0 &&
-        level + 1 < ctx.columns.length && <RespondSlot id={id} level={level} ctx={ctx} />
+        !empty && <RespondSlots id={id} level={level} ctx={ctx} />
       )}
     </div>
   );
 });
 
-/** The empty space directly to the right of an argument: click to type a response in that row. */
-function RespondSlot({ id, level, ctx }: { id: string; level: number; ctx: Ctx }) {
-  // skip over hidden columns to find the next visible column's width
-  let next = level + 1;
-  while (next < ctx.widths.length && ctx.widths[next] === 0) next++;
-  if (next >= ctx.widths.length) return null;
+/** One empty, clickable grid spot. Stretches to the height of its row. */
+function Slot(props: { width: number; label: string; title: string; onClick: () => void; testid?: string; hint?: boolean }) {
   return (
     <div
       className="group/slot flex shrink-0 cursor-text self-stretch px-1 py-[3px]"
-      style={{ width: ctx.widths[next] }}
+      style={{ width: props.width }}
       onMouseDown={(e) => {
         e.preventDefault();
-        ctx.editor.respond(id);
+        props.onClick();
       }}
-      title="Click to respond in this row"
-      data-respond={id}
+      title={props.title}
+      data-slot={props.testid}
     >
       <div className="respond-slot flex-1">
-        <span className="t3 opacity-0 transition-opacity group-hover/slot:opacity-100">+ respond</span>
+        <span className={cls('t3 transition-opacity group-hover/slot:opacity-100', props.hint ? 'opacity-60' : 'opacity-0')}>{props.label}</span>
       </div>
     </div>
   );
+}
+
+/**
+ * The empty columns to the right of an argument that has no response yet. Clicking any of them
+ * starts a response in that column, in this row (blank placeholders fill the columns between).
+ */
+function RespondSlots({ id, level, ctx }: { id: string; level: number; ctx: Ctx }) {
+  const cols = [];
+  for (let c = level + 1; c < ctx.widths.length; c++) {
+    if (ctx.widths[c] === 0) continue;
+    cols.push(
+      <Slot
+        key={c}
+        width={ctx.widths[c]}
+        label={c === level + 1 ? '+ respond' : '+ add'}
+        title={`Write in ${ctx.columns[c].label}, in this row`}
+        onClick={() => ctx.editor.respondAt(id, c)}
+        testid={`respond-${c}`}
+      />,
+    );
+  }
+  return <div className="flex self-stretch" data-respond={id}>{cols}</div>;
 }
 
 const ALT_COLORS = ['#f59e0b', '#10b981', '#ec4899'];
