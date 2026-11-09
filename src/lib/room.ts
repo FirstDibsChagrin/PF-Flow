@@ -1,17 +1,31 @@
-// Room "index" doc: the dashboard list of flows/templates and shared room settings.
+// Personal "home" (your dashboard) + per-flow share codes.
+//
+// Storage layout (each (room, doc) pair is one Yjs document; see sync.ts):
+//   (homeCode, 'index')      -> your dashboard: list of flows + templates, default timer lengths
+//   (homeCode, templateId)   -> a template (templates are personal)
+//   (flowCode, 'flow')       -> a flow. The flow code is what you give your partner: it unlocks
+//                               exactly that flow and nothing else in your home.
+// Home codes and flow codes are both rows in the `rooms` table; the code is the only key.
 import * as Y from 'yjs';
 import { acquireDoc, destroyDocEverywhere, LOCAL, withDoc, type DocSync } from './sync';
-import { copyFlowContent, initFlowDoc, meta, timersMap, type Mode } from './model';
-import { newId } from './util';
+import { copyFlowContent, initFlowDoc, meta, sheetOrder, timersMap, type Mode } from './model';
+import { transport } from './transport';
+import { isValidRoomCode, newId, newRoomCode } from './util';
 
 export type DocKind = 'flow' | 'template';
 export interface Entry {
-  id: string;
+  id: string; // flow code (flows) or template id
   name: string;
   mode: Mode;
   kind: DocKind;
   createdAt: number;
   updatedAt: number;
+  code?: string; // flows: share code where the flow lives
+  joined?: boolean; // flows: joined from a partner's code (you didn't create it)
+}
+export interface Loc {
+  room: string;
+  doc: string;
 }
 
 export interface TimerSettings {
@@ -26,8 +40,72 @@ export interface TimerSettings {
 export const DEFAULT_TIMES: TimerSettings = { C: 240, R: 240, S: 180, F: 120, CX: 180, GCX: 180, prep: 180 };
 
 export const INDEX_DOC = 'index';
+export const FLOW_DOC = 'flow';
 export const entriesMap = (d: Y.Doc) => d.getMap<Y.Map<any>>('entries');
 export const roomSettings = (d: Y.Doc) => d.getMap<any>('settings');
+
+// ---------- home ----------
+const HOME_KEY = 'pf.home';
+const PENDING_KEY = 'pf.pendingRooms';
+
+function readPending(): string[] {
+  try {
+    return JSON.parse(localStorage.getItem(PENDING_KEY) || '[]');
+  } catch {
+    return [];
+  }
+}
+function writePending(xs: string[]) {
+  try {
+    localStorage.setItem(PENDING_KEY, JSON.stringify(xs));
+  } catch {}
+}
+
+/** Register a locally generated code on the server (now, or later if offline). */
+async function registerRoom(code: string): Promise<void> {
+  try {
+    await transport.createRoom(code); // false = already exists, which is fine
+    writePending(readPending().filter((c) => c !== code));
+  } catch {
+    if (!readPending().includes(code)) writePending([...readPending(), code]);
+  }
+}
+/** Retry registering codes that were created offline. */
+export async function flushPendingRooms() {
+  for (const c of readPending()) await registerRoom(c);
+}
+
+let cachedHome: string | null = null;
+export function homeCode(): string {
+  if (cachedHome) return cachedHome;
+  let code: string | null = null;
+  try {
+    // v1 used shared rooms: adopt the last room (or an old /r/CODE link) as this device's home
+    const legacyLink = location.pathname.match(/^\/r\/([A-HJKMNP-Z2-9]{8})/)?.[1];
+    code = localStorage.getItem(HOME_KEY) || localStorage.getItem('pf.lastRoom') || legacyLink || null;
+  } catch {}
+  if (!code || !isValidRoomCode(code)) {
+    code = newRoomCode();
+    registerRoom(code);
+  }
+  try {
+    localStorage.setItem(HOME_KEY, code);
+  } catch {}
+  cachedHome = code;
+  return code;
+}
+
+/** Switch this device to another home (e.g. your home from another computer). */
+export function setHome(code: string) {
+  localStorage.setItem(HOME_KEY, code);
+  location.href = '/';
+}
+
+let indexSync: DocSync | null = null;
+export function homeIndex(): DocSync {
+  if (!indexSync) indexSync = acquireDoc(homeCode(), INDEX_DOC);
+  return indexSync;
+}
 
 export function readEntries(d: Y.Doc): Entry[] {
   const out: Entry[] = [];
@@ -39,32 +117,39 @@ export function readEntries(d: Y.Doc): Entry[] {
       kind: m.get('kind') ?? 'flow',
       createdAt: m.get('createdAt') ?? 0,
       updatedAt: m.get('updatedAt') ?? m.get('createdAt') ?? 0,
+      code: m.get('code'),
+      joined: m.get('joined'),
     });
   });
   return out;
 }
 
-export function readTimes(d: Y.Doc): TimerSettings {
-  const s = roomSettings(d).get('times');
-  return { ...DEFAULT_TIMES, ...(s || {}) };
+export function readDefaultTimes(index: Y.Doc): TimerSettings {
+  return { ...DEFAULT_TIMES, ...(roomSettings(index).get('times') || {}) };
+}
+/** A flow's timer lengths travel with the flow, so both partners use the same ones. */
+export function readFlowTimes(flow: Y.Doc): TimerSettings {
+  return { ...DEFAULT_TIMES, ...(timersMap(flow).get('lengths') || {}) };
 }
 
-let indexSync: { room: string; sync: DocSync } | null = null;
-export function roomIndex(room: string): DocSync {
-  if (indexSync?.room === room) return indexSync.sync;
-  indexSync = { room, sync: acquireDoc(room, INDEX_DOC) };
-  return indexSync.sync;
+/** Where a dashboard entry's document lives. */
+export function locOf(e: Pick<Entry, 'id' | 'kind' | 'code'>): Loc {
+  if (e.kind === 'flow' && e.code) return { room: e.code, doc: FLOW_DOC };
+  return { room: homeCode(), doc: e.id }; // templates, and flows from before share codes existed
 }
+export const flowLoc = (code: string): Loc => ({ room: code, doc: FLOW_DOC });
 
-function putEntry(index: Y.Doc, e: Entry) {
+function putEntry(e: Entry) {
+  const index = homeIndex().doc;
   index.transact(() => {
     const m = new Y.Map<any>();
-    for (const [k, v] of Object.entries(e)) if (k !== 'id') m.set(k, v);
+    for (const [k, v] of Object.entries(e)) if (k !== 'id' && v !== undefined) m.set(k, v);
     entriesMap(index).set(e.id, m);
   }, LOCAL);
 }
 
-export function updateEntry(index: Y.Doc, id: string, patch: Partial<Entry>) {
+export function updateEntry(id: string, patch: Partial<Entry>) {
+  const index = homeIndex().doc;
   const m = entriesMap(index).get(id);
   if (!m) return;
   index.transact(() => {
@@ -72,94 +157,133 @@ export function updateEntry(index: Y.Doc, id: string, patch: Partial<Entry>) {
   }, LOCAL);
 }
 
-export async function createDoc(
-  room: string,
-  opts: { name: string; mode: Mode; kind: DocKind; fromId?: string | null },
-): Promise<string> {
-  const index = roomIndex(room).doc;
-  const id = newId();
-  const now = Date.now();
-  let mode = opts.mode;
-  if (opts.fromId) {
-    await withDoc(room, opts.fromId, async (src) => {
-      await withDoc(room, id, (dst) => {
-        copyFlowContent(src.doc, dst.doc, { name: opts.name, mode: opts.mode, kind: opts.kind });
-      }, false);
-    });
+// ---------- create / copy ----------
+async function fill(dst: Loc, opts: { name: string; mode: Mode; kind: DocKind; from?: Loc | null }) {
+  const write = (d: Y.Doc, src?: Y.Doc) => {
+    if (src) copyFlowContent(src, d, { name: opts.name, mode: opts.mode, kind: opts.kind });
+    else initFlowDoc(d, opts.name, opts.mode, opts.kind);
+    if (opts.kind === 'flow') {
+      const lengths = readDefaultTimes(homeIndex().doc);
+      d.transact(() => timersMap(d).set('lengths', lengths), LOCAL);
+    }
+  };
+  if (opts.from) {
+    const from = opts.from;
+    await withDoc(from.room, from.doc, (src) => withDoc(dst.room, dst.doc, (d) => write(d.doc, src.doc), false));
   } else {
-    await withDoc(room, id, (dst) => initFlowDoc(dst.doc, opts.name, mode, opts.kind), false);
+    await withDoc(dst.room, dst.doc, (d) => write(d.doc), false);
   }
-  putEntry(index, { id, name: opts.name, mode, kind: opts.kind, createdAt: now, updatedAt: now });
+}
+
+/** Create a new flow with its own share code. Returns the code. */
+export async function createFlow(opts: { name: string; mode: Mode; from?: Loc | null }): Promise<string> {
+  const code = newRoomCode();
+  await registerRoom(code);
+  await fill(flowLoc(code), { ...opts, kind: 'flow' });
+  const now = Date.now();
+  putEntry({ id: code, code, name: opts.name, mode: opts.mode, kind: 'flow', createdAt: now, updatedAt: now });
+  return code;
+}
+
+export async function createTemplate(opts: { name: string; mode: Mode; from?: Loc | null }): Promise<string> {
+  const id = newId();
+  await fill({ room: homeCode(), doc: id }, { ...opts, kind: 'template' });
+  const now = Date.now();
+  putEntry({ id, name: opts.name, mode: opts.mode, kind: 'template', createdAt: now, updatedAt: now });
   return id;
 }
 
-export async function duplicateDoc(room: string, srcId: string, name: string, kind: DocKind): Promise<string> {
-  const index = roomIndex(room).doc;
-  const src = entriesMap(index).get(srcId);
-  return createDoc(room, { name, mode: src?.get('mode') ?? 'aff', kind, fromId: srcId });
+export async function duplicateEntry(e: Entry): Promise<string> {
+  const name = `${e.name} (copy)`;
+  return e.kind === 'flow' ? createFlow({ name, mode: e.mode, from: locOf(e) }) : createTemplate({ name, mode: e.mode, from: locOf(e) });
 }
 
-export async function deleteDocEntry(room: string, id: string) {
-  const index = roomIndex(room).doc;
-  index.transact(() => entriesMap(index).delete(id), LOCAL);
-  await destroyDocEverywhere(room, id);
+/** Flows made before share codes existed live inside the home; give them their own code. */
+export async function ensureFlowCode(e: Entry): Promise<string> {
+  if (e.code) return e.code;
+  const code = newRoomCode();
+  await registerRoom(code);
+  await fill(flowLoc(code), { name: e.name, mode: e.mode, kind: 'flow', from: locOf(e) });
+  const old = locOf(e);
+  const index = homeIndex().doc;
+  index.transact(() => entriesMap(index).delete(e.id), LOCAL);
+  putEntry({ ...e, id: code, code });
+  destroyDocEverywhere(old.room, old.doc);
+  return code;
 }
 
-/** Keep the index entry (name/mode/updatedAt) in step with a flow doc. */
-export function bindEntry(room: string, id: string, flow: Y.Doc): () => void {
-  const index = roomIndex(room).doc;
+// ---------- join ----------
+export type JoinResult = { ok: true; code: string } | { ok: false; error: string };
+
+/** Add a partner's flow to your dashboard. Requires a connection the first time. */
+export async function joinFlow(raw: string): Promise<JoinResult> {
+  const code = raw.toUpperCase();
+  if (!isValidRoomCode(code)) return { ok: false, error: 'Flow codes are 8 characters, like K7QM2XPA.' };
+  if (code === homeCode()) return { ok: false, error: "That's your own home code, not a flow code." };
+  if (entriesMap(homeIndex().doc).has(code)) return { ok: true, code };
+  try {
+    if (!(await transport.roomExists(code))) return { ok: false, error: 'No flow with that code.' };
+  } catch {
+    return { ok: false, error: "You're offline. Joining a flow needs a connection the first time." };
+  }
+  const info = await withDoc(code, FLOW_DOC, (s) => ({
+    name: meta(s.doc).get('name') as string | undefined,
+    mode: (meta(s.doc).get('mode') as Mode) || 'aff',
+    createdAt: (meta(s.doc).get('createdAt') as number) || Date.now(),
+    sheets: sheetOrder(s.doc).length,
+  }));
+  if (!info.name && !info.sheets) return { ok: false, error: 'No flow with that code.' };
+  putEntry({ id: code, code, name: info.name || 'Shared flow', mode: info.mode, kind: 'flow', createdAt: info.createdAt, updatedAt: Date.now(), joined: true });
+  return { ok: true, code };
+}
+
+/** Opening a flow link directly also adds it to your dashboard. */
+export function rememberFlow(code: string, flow: Y.Doc) {
+  if (entriesMap(homeIndex().doc).has(code)) return;
+  const m = meta(flow);
+  if (!m.get('name')) return;
+  putEntry({ id: code, code, name: m.get('name'), mode: m.get('mode') || 'aff', kind: 'flow', createdAt: m.get('createdAt') || Date.now(), updatedAt: Date.now(), joined: true });
+}
+
+// ---------- delete / rename ----------
+/** Remove from your dashboard. Flows you created (and templates) are also deleted from the server. */
+export async function deleteEntry(e: Entry) {
+  const index = homeIndex().doc;
+  index.transact(() => entriesMap(index).delete(e.id), LOCAL);
+  const loc = locOf(e);
+  if (e.kind === 'template' || !e.joined) await destroyDocEverywhere(loc.room, loc.doc);
+}
+
+export async function renameEntry(e: Entry, name: string) {
+  updateEntry(e.id, { name, updatedAt: Date.now() });
+  const loc = locOf(e);
+  await withDoc(loc.room, loc.doc, (s) => s.doc.transact(() => meta(s.doc).set('name', name), LOCAL));
+}
+
+/** Keep the dashboard entry (name/mode/updatedAt) in step with an open flow or template. */
+export function bindEntry(id: string, flow: Y.Doc): () => void {
   let last = 0;
   const onUpdate = (_u: Uint8Array, origin: unknown) => {
     if (origin !== LOCAL) return;
     const now = Date.now();
     if (now - last < 8000) return;
     last = now;
-    updateEntry(index, id, { updatedAt: now });
+    updateEntry(id, { updatedAt: now });
   };
   const m = meta(flow);
   const onMeta = () => {
-    const e = entriesMap(index).get(id);
+    const e = entriesMap(homeIndex().doc).get(id);
     if (!e) return;
     const name = m.get('name');
     const mode = m.get('mode');
-    if (name && e.get('name') !== name) updateEntry(index, id, { name });
-    if (mode && e.get('mode') !== mode) updateEntry(index, id, { mode });
+    if (name && e.get('name') !== name) updateEntry(id, { name });
+    if (mode && e.get('mode') !== mode) updateEntry(id, { mode });
   };
   flow.on('update', onUpdate);
   m.observe(onMeta);
-  void timersMap; // timers live in the flow doc
+  onMeta();
   return () => {
     flow.off('update', onUpdate);
     m.unobserve(onMeta);
   };
-}
-
-/** Rename from the dashboard: update both the index and the flow doc meta. */
-export async function renameDoc(room: string, id: string, name: string) {
-  const index = roomIndex(room).doc;
-  updateEntry(index, id, { name, updatedAt: Date.now() });
-  await withDoc(room, id, (s) => s.doc.transact(() => meta(s.doc).set('name', name), LOCAL));
-}
-
-// ---------- recent rooms (local) ----------
-export const LAST_ROOM_KEY = 'pf.lastRoom';
-export function rememberRoom(code: string) {
-  try {
-    localStorage.setItem(LAST_ROOM_KEY, code);
-    const known = new Set<string>(JSON.parse(localStorage.getItem('pf.knownRooms') || '[]'));
-    known.add(code);
-    localStorage.setItem('pf.knownRooms', JSON.stringify([...known]));
-  } catch {}
-}
-export function isKnownRoom(code: string) {
-  try {
-    return (JSON.parse(localStorage.getItem('pf.knownRooms') || '[]') as string[]).includes(code);
-  } catch {
-    return false;
-  }
-}
-export function forgetLastRoom() {
-  try {
-    localStorage.removeItem(LAST_ROOM_KEY);
-  } catch {}
 }

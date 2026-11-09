@@ -8,11 +8,11 @@ Cell editing and keyboard navigation follow [Flower](https://debate-flow.vercel.
 | Piece | Choice | Why |
 | --- | --- | --- |
 | App | Vite + React + TypeScript + Tailwind, static SPA | No server code. Fully offline-capable as a PWA (a service worker caches the app shell, so reloading offline works). |
-| Data model | [Yjs](https://yjs.dev) CRDT, one `Y.Doc` per flow/template plus one per-room index doc | Concurrent edits merge character by character; nothing is overwritten. |
+| Data model | [Yjs](https://yjs.dev) CRDT, one `Y.Doc` per flow/template plus one dashboard doc per person | Concurrent edits merge character by character; nothing is overwritten. |
 | Offline | `y-indexeddb` (every change is saved locally right away) plus a localStorage stash on page unload | Works with no Wi-Fi. Changes merge automatically when the connection comes back. |
 | Live sync | Supabase Realtime **broadcast** (Yjs updates, cursors) plus **presence** (who's here) | Typical latency is about 60–100 ms. |
 | Durable storage | Supabase Postgres append-only update log, compacted automatically | A new device or partner loads the full flow even when nobody else is online. |
-| Access control | No auth. Tables have RLS on and **no policies**. All access goes through `SECURITY DEFINER` RPCs that require the 8-character room code (31-symbol alphabet, ~8.5×10¹¹ codes). | You can't list rooms; you need the code. |
+| Access control | No auth. Tables have RLS on and **no policies**. All access goes through `SECURITY DEFINER` RPCs that require an 8-character code (31-symbol alphabet, ~8.5×10¹¹ codes). Each flow is stored under its own code; your dashboard and templates are stored under a private home code. | Sharing a flow's code gives access to that one flow only, never your dashboard. Codes can't be listed. |
 
 Why not Next.js? Nothing here needs server rendering. A static SPA with a service worker gives much more reliable offline reloads.
 
@@ -48,11 +48,17 @@ npm run preview              # http://localhost:4173
    * Environment variables (Production + Preview):
      * `VITE_SUPABASE_URL=https://mlfarkjibpcnxcfozbly.supabase.co`
      * `VITE_SUPABASE_ANON_KEY=<publishable key from Supabase → Settings → API>`
-3. Open the site, click **Create a room**, and send the 8-character code to your partner. Both of you are rejoined to that room automatically next time.
+3. Open the site. You land on your own dashboard. Create a flow, and send the code shown at the top of the flow to your partner.
 
 ## Using it
 
-* **Rooms:** one room holds your team's flows and templates. The code is in the top bar (click to copy). **Leave** goes back to the join screen.
+* **Your dashboard:** opening the site takes you straight to your own flows and templates. It's created automatically on your first visit and saved on this device.
+  * To see the same dashboard on another computer, go to **Settings → Your dashboard on another device**, copy your private home code there, and enter it on the other computer.
+* **Sharing a flow:** every flow has its own 8-character code, shown at the top of the flow (click to copy).
+  * Your partner enters it in **Join your partner's flow** on their dashboard. The flow opens and is added to their dashboard (marked "Shared with you"). Opening a `/f/CODE` link does the same.
+  * The code only unlocks that one flow. Your other flows and templates stay private.
+  * Deleting a flow you created deletes it for everyone. Removing a flow that was shared with you only takes it off your dashboard; your partner keeps it.
+  * Flows from the earlier shared-room version keep working: each one gets its own code the first time you open it.
 * **Flows:** each flow has Aff and Con tabs. Add more with **+** (Weighing, Offs, Overview, Notes, or a custom name). Double-click a tab to rename it. Drag tabs to reorder. Use the tab's ⋯ menu to move, delete, or show and hide columns on extra tabs.
 * **Modes:** "Aff speaks first" or "Con speaks first" is chosen when you create a flow and can be switched in the header.
   * First team's sheet: Const → opp. Rebuttal → Summaries → Final Focuses (6 columns).
@@ -62,8 +68,8 @@ npm run preview              # http://localhost:4173
 * **Responding in the same row:** click the empty space directly to the right of any argument (or press → in it) and start typing. If you leave without typing, the empty cell disappears.
 * **Cells** work like Flower. A cell's responses sit in the next column on the same row, so a whole argument chain lines up horizontally.
 * **Marks:** dropped (red, struck through), extended (green), and turned (purple). Use Alt+1/2/3, or right-click a cell.
-* **Templates:** build one in the Templates tab, or click **Save as template** in any flow. Start a flow from a template in the New flow dialog or with a template's **New flow from this** button. The copy is independent of the template. A template used in the other mode keeps column positions, so constructives stay in column 1.
-* **Timers:** these sit in the bottom bar and are synced through the flow, using a server-calibrated clock. They cover every PF speech and crossfire, plus Aff and Con prep. Default lengths are 4/4/3/2 minutes for speeches, 3:00 for crossfires, and 3:00 prep. Change lengths in Settings; the lengths are shared by the room. When time runs out the bar flashes, and there's an optional beep (speaker icon).
+* **Templates** are personal (on your dashboard). Build one in the Templates tab, or click **Save as template** in any flow. Start a flow from a template in the New flow dialog or with a template's **New flow from this** button. The copy is independent of the template. A template used in the other mode keeps column positions, so constructives stay in column 1.
+* **Timers:** these sit in the bottom bar and are synced through the flow, using a server-calibrated clock. They cover every PF speech and crossfire, plus Aff and Con prep. Default lengths are 4/4/3/2 minutes for speeches, 3:00 for crossfires, and 3:00 prep. Change lengths in Settings: inside a flow you edit that flow's lengths, which are shared with your partner. On the dashboard you edit the defaults for your new flows. When time runs out the bar flashes, and there's an optional beep (speaker icon).
 * **Settings** (gear icon): your name and cursor color, theme (system/light/dark), cell font size (12–20 px), reset column widths (drag a column header's right edge to resize), timer sound, and timer lengths.
 
 ## Keyboard shortcuts

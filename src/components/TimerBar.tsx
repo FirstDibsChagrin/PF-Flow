@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import * as Y from 'yjs';
 import { timersMap, type Mode } from '../lib/model';
-import { readTimes, roomSettings } from '../lib/room';
+import { readFlowTimes } from '../lib/room';
 import { patchSettings, useSettings } from '../lib/settings';
 import { clockRemaining, fmt, readClock, resetClock, setSpeech, speechIndex, speechSequence, toggleClock, type TimerKey } from '../lib/timers';
 import { useY } from '../lib/yhooks';
@@ -27,8 +27,8 @@ function beep() {
   } catch {}
 }
 
-export function useTimerControls(doc: Y.Doc, index: Y.Doc, mode: Mode) {
-  const times = readTimes(index);
+export function useTimerControls(doc: Y.Doc, mode: Mode) {
+  const times = readFlowTimes(doc);
   const seq = speechSequence(mode);
   const idx = Math.min(speechIndex(doc), seq.length - 1);
   const speechMs = times[seq[idx].len] * 1000;
@@ -94,10 +94,9 @@ function Clock(props: { k: TimerKey; label: string; full: number; doc: Y.Doc; on
   );
 }
 
-export function TimerBar({ doc, index, mode }: { doc: Y.Doc; index: Y.Doc; mode: Mode }) {
+export function TimerBar({ doc, mode }: { doc: Y.Doc; mode: Mode }) {
   useY(timersMap(doc));
-  useY(roomSettings(index), true);
-  const t = useTimerControls(doc, index, mode);
+  const t = useTimerControls(doc, mode);
   const sound = useSettings((s) => s.sound);
   const slot = t.seq[t.idx];
   return (

@@ -1,6 +1,10 @@
-import { useParams } from 'react-router-dom';
+import * as Y from 'yjs';
 import { LOCAL } from '../lib/sync';
-import { DEFAULT_TIMES, readTimes, roomIndex, roomSettings, type TimerSettings } from '../lib/room';
+import { DEFAULT_TIMES, homeCode, homeIndex, readDefaultTimes, readFlowTimes, roomSettings, setHome, type TimerSettings } from '../lib/room';
+import { timersMap } from '../lib/model';
+import { isValidRoomCode, normalizeRoomCode } from '../lib/util';
+import { toast } from './ui';
+import { useState } from 'react';
 import { patchSettings, USER_COLORS, useSettings, type Theme } from '../lib/settings';
 import { Store, useStore } from '../lib/store';
 import { useY } from '../lib/yhooks';
@@ -9,14 +13,15 @@ import { Modal } from './ui';
 
 const open = new Store(false);
 export const openSettings = () => open.set(true);
+/** The flow currently open (timer lengths are edited per flow while one is open). */
+export const currentFlow = new Store<Y.Doc | null>(null);
 
 export function SettingsHost() {
   const isOpen = useStore(open);
-  const { code } = useParams();
   if (!isOpen) return null;
   return (
     <Modal onClose={() => open.set(false)} title="Settings" width={520}>
-      <SettingsBody room={code} />
+      <SettingsBody />
     </Modal>
   );
 }
@@ -33,7 +38,7 @@ function Row({ label, hint, children }: { label: string; hint?: string; children
   );
 }
 
-function SettingsBody({ room }: { room?: string }) {
+function SettingsBody() {
   const s = useSettings();
   return (
     <div className="px-5 py-3">
@@ -73,7 +78,8 @@ function SettingsBody({ room }: { room?: string }) {
       <Row label="Timer sound" hint="Beep when a timer runs out">
         <input type="checkbox" checked={s.sound} onChange={(e) => patchSettings({ sound: e.target.checked })} className="h-4 w-4 accent-[var(--accent)]" />
       </Row>
-      {room && <TimerSettingsSection room={room} />}
+      <TimerSettingsSection />
+      <HomeSection />
     </div>
   );
 }
@@ -88,18 +94,22 @@ const LABELS: [keyof TimerSettings, string][] = [
   ['prep', 'Prep (per team)'],
 ];
 
-function TimerSettingsSection({ room }: { room: string }) {
-  const index = roomIndex(room).doc;
+function TimerSettingsSection() {
+  const flow = useStore(currentFlow);
+  const index = homeIndex().doc;
   useY(roomSettings(index), true);
-  const t = readTimes(index);
-  const set = (k: keyof TimerSettings, sec: number) => {
-    index.transact(() => roomSettings(index).set('times', { ...readTimes(index), [k]: sec }), LOCAL);
+  useY(flow ? timersMap(flow) : null);
+  const t = flow ? readFlowTimes(flow) : readDefaultTimes(index);
+  const write = (v: TimerSettings) => {
+    if (flow) flow.transact(() => timersMap(flow).set('lengths', v), LOCAL);
+    else index.transact(() => roomSettings(index).set('times', v), LOCAL);
   };
+  const set = (k: keyof TimerSettings, sec: number) => write({ ...t, [k]: sec });
   return (
     <>
       <div className="t3 flex items-center justify-between pb-1 pt-4 text-[11px] font-semibold uppercase tracking-wide">
-        Timer lengths (shared with partner)
-        <button className="btn !py-0.5 normal-case tracking-normal" onClick={() => index.transact(() => roomSettings(index).set('times', DEFAULT_TIMES), LOCAL)}>
+        {flow ? 'Timer lengths for this flow (shared with partner)' : 'Default timer lengths for new flows'}
+        <button className="btn !py-0.5 normal-case tracking-normal" onClick={() => write(DEFAULT_TIMES)}>
           Defaults
         </button>
       </div>
@@ -122,6 +132,37 @@ function TimerSettingsSection({ room }: { room: string }) {
             </span>
           </div>
         ))}
+      </div>
+    </>
+  );
+}
+
+function HomeSection() {
+  const [code, setCode] = useState('');
+  const [show, setShow] = useState(false);
+  const mine = homeCode();
+  return (
+    <>
+      <div className="t3 pb-1 pt-5 text-[11px] font-semibold uppercase tracking-wide">Your dashboard on another device</div>
+      <div className="t2 pb-2 text-[12px] leading-relaxed">
+        Your dashboard is saved under a private home code. Enter it on another computer to see the same flows and templates there. Keep it to yourself: it opens everything on your dashboard.
+      </div>
+      <div className="flex items-center justify-between gap-3 py-1.5">
+        <button className="btn btn-outline font-mono tracking-wider" onClick={() => (show ? (navigator.clipboard?.writeText(mine), toast('Home code copied')) : setShow(true))}>
+          {show ? mine : 'Show my home code'}
+        </button>
+        <form
+          className="flex gap-2"
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (isValidRoomCode(code) && code !== mine) setHome(code);
+          }}
+        >
+          <input className="input !w-36 !py-1.5 text-center font-mono uppercase tracking-wider" placeholder="HOME CODE" maxLength={9} value={code} onChange={(e) => setCode(normalizeRoomCode(e.target.value))} />
+          <button className="btn btn-outline" disabled={!isValidRoomCode(code) || code === mine}>
+            Switch
+          </button>
+        </form>
       </div>
     </>
   );

@@ -82,6 +82,8 @@ export class DocSync {
     document.addEventListener('visibilitychange', this.onVisible);
     this.pollTimer = setInterval(() => {
       if (document.visibilityState === 'visible') this.pull(Date.now() - this.lastFull > 120_000);
+      this.sendCursor(); // heartbeat so partners keep seeing us
+      this.publishPresence(); // expire peers we stopped hearing from
     }, 10_000);
   }
 
@@ -115,10 +117,15 @@ export class DocSync {
   // Membership comes from Realtime Presence (rate-limited, so only name/color are tracked);
   // cursor positions travel over broadcast, which tolerates frequent updates.
   private members = new Map<string, { name: string; color: string }>();
+  // peers heard from over broadcast (shows partners instantly; Presence can lag a few seconds)
+  private heard = new Map<string, { name: string; color: string; at: number }>();
   private cursors = new Map<string, { sheet: string | null; node: string | null }>();
   private publishPresence() {
+    const now = Date.now();
+    const all = new Map(this.members);
+    for (const [id, h] of this.heard) if (!all.has(id) && now - h.at < 20_000) all.set(id, { name: h.name, color: h.color });
     const list: PresenceState[] = [];
-    for (const [id, m] of this.members) list.push({ id, ...m, ...(this.cursors.get(id) ?? { sheet: null, node: null }) });
+    for (const [id, m] of all) list.push({ id, ...m, ...(this.cursors.get(id) ?? { sheet: null, node: null }) });
     this.presence.set(list);
   }
 
@@ -131,7 +138,6 @@ export class DocSync {
           const s = (arr as any[])[0];
           if (s && k !== CLIENT_KEY) this.members.set(k, { name: s.name, color: s.color });
         }
-        for (const k of [...this.cursors.keys()]) if (!this.members.has(k)) this.cursors.delete(k);
         this.publishPresence();
       },
       onStatus: (s) => {
@@ -164,7 +170,7 @@ export class DocSync {
       if (key === this.lastMember) return;
       this.lastMember = key;
       this.ch?.track(m);
-    }, 500);
+    }, 150);
   }
 
   private cursorTimer: any = null;
@@ -173,7 +179,7 @@ export class DocSync {
     this.cursorTimer = setTimeout(() => {
       this.cursorTimer = null;
       const p = this.myPresence;
-      if (p) this.ch?.send({ t: 'cur', from: CLIENT_KEY, sheet: p.sheet ?? null, node: p.node ?? null });
+      if (p) this.ch?.send({ t: 'cur', from: CLIENT_KEY, name: p.name, color: p.color, sheet: p.sheet ?? null, node: p.node ?? null });
     }, 60);
   }
 
@@ -187,6 +193,7 @@ export class DocSync {
     return `pf.stash.${this.room}.${this.docId}`;
   }
   private onHide = () => {
+    this.ch?.send({ t: 'bye', from: CLIENT_KEY });
     if (!this.queue.length) return;
     const merged = Y.mergeUpdates(this.queue);
     const b64 = toBase64(merged);
@@ -236,6 +243,11 @@ export class DocSync {
     if (!msg || msg.from === CLIENT_KEY) return;
     if (msg.t === 'cur') {
       this.cursors.set(msg.from, { sheet: msg.sheet, node: msg.node });
+      if (msg.name) this.heard.set(msg.from, { name: msg.name, color: msg.color, at: Date.now() });
+      this.publishPresence();
+    } else if (msg.t === 'bye') {
+      this.heard.delete(msg.from);
+      this.cursors.delete(msg.from);
       this.publishPresence();
     } else if (msg.t === 'u') {
       Y.applyUpdate(this.doc, fromBase64(msg.d), REMOTE);
@@ -342,7 +354,9 @@ export class DocSync {
     window.removeEventListener('offline', this.onOffline);
     window.removeEventListener('pagehide', this.onHide);
     document.removeEventListener('visibilitychange', this.onVisible);
-    this.ch?.close();
+    this.ch?.send({ t: 'bye', from: CLIENT_KEY });
+    const ch = this.ch;
+    setTimeout(() => ch?.close(), 200);
     this.doc.off('update', this.onDocUpdate);
     // let IndexedDB finish writing before tearing down
     setTimeout(() => {

@@ -16,7 +16,8 @@ import {
   txn,
   type Mode,
 } from '../lib/model';
-import { bindEntry, createDoc, entriesMap, roomIndex } from '../lib/room';
+import { bindEntry, createTemplate, FLOW_DOC, homeCode, rememberFlow } from '../lib/room';
+import { currentFlow } from './SettingsPanel';
 import { useSettings } from '../lib/settings';
 import { useStore } from '../lib/store';
 import { acquireDoc, releaseDoc } from '../lib/sync';
@@ -30,23 +31,29 @@ import { openShortcuts } from './Shortcuts';
 import { openSettings } from './SettingsPanel';
 
 export function FlowPage({ kind }: { kind: 'flow' | 'template' }) {
-  const { code = '', id = '' } = useParams();
+  const params = useParams();
+  // flows live under their own share code; templates live in your home
+  const room = kind === 'flow' ? (params.code ?? '').toUpperCase() : homeCode();
+  const docId = kind === 'flow' ? FLOW_DOC : params.id ?? '';
+  const entryId = kind === 'flow' ? room : docId;
   const [editor, setEditor] = useState<FlowEditor | null>(null);
   useEffect(() => {
-    const sync = acquireDoc(code, id);
-    const ed = new FlowEditor(sync, code, id);
+    const sync = acquireDoc(room, docId);
+    const ed = new FlowEditor(sync, room, docId);
     let cancelled = false;
     sync.loaded.then(() => !cancelled && setEditor(ed));
-    const unbind = bindEntry(code, id, sync.doc);
+    const unbind = bindEntry(entryId, sync.doc);
+    currentFlow.set(kind === 'flow' ? sync.doc : null);
     return () => {
       cancelled = true;
       unbind();
       ed.destroy();
-      releaseDoc(code, id);
+      currentFlow.set(null);
+      releaseDoc(room, docId);
     };
-  }, [code, id]);
+  }, [room, docId]);
   if (!editor) return <div className="t3 flex h-full items-center justify-center text-sm">Loading flow…</div>;
-  return <FlowView key={id} editor={editor} kind={kind} />;
+  return <FlowView key={room + docId} editor={editor} kind={kind} />;
 }
 
 const EXTRA_PRESETS = ['Weighing', 'Offs', 'Overview', 'Notes'];
@@ -55,8 +62,8 @@ function FlowView({ editor, kind }: { editor: FlowEditor; kind: 'flow' | 'templa
   const nav = useNavigate();
   const doc = editor.doc;
   const sync = editor.sync;
-  const index = roomIndex(editor.room).doc;
   const m = meta(doc);
+  const sheetKey = 'pf.sheet.' + editor.room + editor.id;
   useY(m);
   useY(sheetOrder(doc));
   useY(sheetsMap(doc), true);
@@ -69,17 +76,22 @@ function FlowView({ editor, kind }: { editor: FlowEditor; kind: 'flow' | 'templa
   const focus = useStore(editor.focus);
   const mode: Mode = m.get('mode') || 'aff';
   const name: string = m.get('name') || 'Untitled';
-  const entryExists = useStoreEntry(index, editor.id);
+  const missing = status.serverSynced && !m.get('name') && sheets.length === 0;
+
+  // opening a flow by its code (or link) adds it to your dashboard
+  useEffect(() => {
+    if (kind === 'flow' && m.get('name')) rememberFlow(editor.room, doc);
+  }, [kind, m.get('name')]);
 
   // keep a valid active sheet
   useEffect(() => {
     if (!active || !sheets.includes(active)) {
-      const saved = sessionStorage.getItem('pf.sheet.' + editor.id);
+      const saved = sessionStorage.getItem(sheetKey);
       editor.activeSheet.set(saved && sheets.includes(saved) ? saved : sheets[0] ?? null);
     }
   }, [active, sheets.join()]);
   useEffect(() => {
-    if (active) sessionStorage.setItem('pf.sheet.' + editor.id, active);
+    if (active) sessionStorage.setItem(sheetKey, active);
   }, [active]);
 
   // presence: tell partner where I am
@@ -93,7 +105,7 @@ function FlowView({ editor, kind }: { editor: FlowEditor; kind: 'flow' | 'templa
     [others, meColor],
   );
 
-  const timers = useTimerControls(doc, index, mode);
+  const timers = useTimerControls(doc, mode);
 
   // global shortcuts
   const lastFocus = useRef<string | null>(null);
@@ -188,16 +200,15 @@ function FlowView({ editor, kind }: { editor: FlowEditor; kind: 'flow' | 'templa
   const saveAsTemplate = async () => {
     const v = await promptDialog('Save as template', `${name} template`, 'Save template');
     if (!v) return;
-    const tid = await createDoc(editor.room, { name: v, mode, kind: 'template', fromId: editor.id });
-    toast('Template saved');
-    void tid;
+    await createTemplate({ name: v, mode, from: { room: editor.room, doc: editor.id } });
+    toast('Template saved to your Templates');
   };
 
-  if (!entryExists && status.serverSynced) {
+  if (missing) {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-3">
-        <div className="t2 text-sm">This {kind} was deleted.</div>
-        <Link className="btn btn-outline" to={`/r/${editor.room}`}>
+        <div className="t2 text-sm">{kind === 'flow' ? `No flow with the code ${editor.room}. It may have been deleted.` : 'This template was deleted.'}</div>
+        <Link className="btn btn-outline" to="/">
           Back to dashboard
         </Link>
       </div>
@@ -208,7 +219,7 @@ function FlowView({ editor, kind }: { editor: FlowEditor; kind: 'flow' | 'templa
     <div className="flex h-full flex-col">
       {/* header */}
       <header className="flex h-12 shrink-0 items-center gap-3 border-b bd px-3" style={{ background: 'var(--panel)' }}>
-        <button className="btn !px-2" onClick={() => nav(`/r/${editor.room}${kind === 'template' ? '/templates' : ''}`)} title="Back">
+        <button className="btn !px-2" onClick={() => nav(kind === 'template' ? '/templates' : '/')} title="Back to dashboard">
           <Icon.back />
         </button>
         <button className="truncate rounded-md px-1.5 py-0.5 text-[15px] font-semibold hover:bg-[var(--hover-bg)]" onClick={rename} title="Rename" data-testid="flow-name">
@@ -228,6 +239,21 @@ function FlowView({ editor, kind }: { editor: FlowEditor; kind: 'flow' | 'templa
           ))}
         </div>
         <div className="ml-auto flex items-center gap-3">
+          {kind === 'flow' && (
+            <button
+              className="btn btn-outline gap-2"
+              title="Share this code with your partner. They enter it under “Join your partner's flow” on their dashboard."
+              onClick={() => {
+                navigator.clipboard?.writeText(editor.room);
+                toast('Flow code copied. Send it to your partner.');
+              }}
+              data-testid="flow-code"
+            >
+              <span className="t3 text-[11px] font-medium uppercase tracking-wide">Code</span>
+              <span className="font-mono text-[13.5px] font-semibold tracking-[0.15em]">{editor.room}</span>
+              <Icon.copy />
+            </button>
+          )}
           <StatusPill status={status} local={transport.kind === 'local'} />
           <Presence me={{ name: meName, color: meColor }} others={othersShown} />
           {kind === 'flow' && (
@@ -245,15 +271,9 @@ function FlowView({ editor, kind }: { editor: FlowEditor; kind: 'flow' | 'templa
       </header>
       <TabBar editor={editor} sheets={sheets} active={active} />
       <div className="min-h-0 flex-1">{active && <Sheet key={active} editor={editor} sheet={active} presence={sync.presence} />}</div>
-      {kind === 'flow' && <TimerBar doc={doc} index={index} mode={mode} />}
+      {kind === 'flow' && <TimerBar doc={doc} mode={mode} />}
     </div>
   );
-}
-
-function useStoreEntry(index: import('yjs').Doc, id: string) {
-  const em = entriesMap(index);
-  useY(em);
-  return em.has(id);
 }
 
 function TabBar({ editor, sheets, active }: { editor: FlowEditor; sheets: string[]; active: string | null }) {

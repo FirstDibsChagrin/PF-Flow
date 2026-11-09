@@ -1,24 +1,31 @@
-import { useEffect, useMemo, useState } from 'react';
-import { NavLink, Outlet, useNavigate, useParams } from 'react-router-dom';
-import { createDoc, deleteDocEntry, duplicateDoc, entriesMap, forgetLastRoom, readEntries, rememberRoom, renameDoc, roomIndex, type DocKind, type Entry } from '../lib/room';
+import { useMemo, useState } from 'react';
+import { NavLink, useNavigate } from 'react-router-dom';
+import {
+  createFlow,
+  createTemplate,
+  deleteEntry,
+  duplicateEntry,
+  ensureFlowCode,
+  entriesMap,
+  homeIndex,
+  joinFlow,
+  locOf,
+  readEntries,
+  renameEntry,
+  type DocKind,
+  type Entry,
+} from '../lib/room';
 import type { Mode } from '../lib/model';
 import { useStore } from '../lib/store';
 import { transport } from '../lib/transport';
 import { useY } from '../lib/yhooks';
-import { cls, timeAgo } from '../lib/util';
+import { cls, normalizeRoomCode, timeAgo } from '../lib/util';
 import { confirmDialog, Icon, Menu, MenuItem, MenuSep, Modal, promptDialog, StatusPill, toast } from './ui';
 import { openSettings } from './SettingsPanel';
 import { openShortcuts } from './Shortcuts';
 
-export function RoomLayout() {
-  const { code = '' } = useParams();
-  useEffect(() => rememberRoom(code), [code]);
-  return <Outlet />;
-}
-
-function RoomHeader({ code }: { code: string }) {
-  const nav = useNavigate();
-  const status = useStore(roomIndex(code).status);
+function HomeHeader() {
+  const status = useStore(homeIndex().status);
   return (
     <header className="flex h-14 shrink-0 items-center gap-6 border-b bd px-6" style={{ background: 'var(--panel)' }}>
       <div className="flex items-center gap-2.5">
@@ -27,62 +34,85 @@ function RoomHeader({ code }: { code: string }) {
       </div>
       <nav className="flex gap-1 text-[13px]">
         {[
-          ['', 'Flows'],
+          ['/', 'Flows'],
           ['/templates', 'Templates'],
         ].map(([p, l]) => (
-          <NavLink key={p} end to={`/r/${code}${p}`} className={({ isActive }) => cls('btn', isActive ? 'bg-[var(--panel-2)] font-semibold' : 't2')}>
+          <NavLink key={p} end to={p} className={({ isActive }) => cls('btn', isActive ? 'bg-[var(--panel-2)] font-semibold' : 't2')}>
             {l}
           </NavLink>
         ))}
       </nav>
       <div className="ml-auto flex items-center gap-3">
         <StatusPill status={status} local={transport.kind === 'local'} />
-        <button
-          className="btn btn-outline font-mono tracking-wider"
-          title="Room code — share with your partner. Click to copy."
-          onClick={() => {
-            navigator.clipboard?.writeText(code);
-            toast('Room code copied');
-          }}
-          data-testid="room-code"
-        >
-          {code} <Icon.copy />
-        </button>
         <button className="btn !p-1.5" onClick={openShortcuts} title="Keyboard shortcuts">
           <Icon.keyboard />
         </button>
         <button className="btn !p-1.5" onClick={openSettings} title="Settings">
           <Icon.gear />
         </button>
-        <button
-          className="btn t2"
-          onClick={() => {
-            forgetLastRoom();
-            nav('/?switch=1');
-          }}
-        >
-          Leave
-        </button>
       </div>
     </header>
+  );
+}
+
+function JoinBox() {
+  const nav = useNavigate();
+  const [code, setCode] = useState('');
+  const [err, setErr] = useState('');
+  const [busy, setBusy] = useState(false);
+  const submit = async () => {
+    if (busy) return;
+    setBusy(true);
+    setErr('');
+    const r = await joinFlow(code);
+    setBusy(false);
+    if (r.ok) nav(`/f/${r.code}`);
+    else setErr(r.error);
+  };
+  return (
+    <form
+      className="panel mb-6 flex items-center gap-3 rounded-xl px-4 py-3"
+      onSubmit={(e) => {
+        e.preventDefault();
+        submit();
+      }}
+    >
+      <div className="min-w-0 flex-1">
+        <div className="text-[13.5px] font-semibold">Join your partner's flow</div>
+        <div className={cls('text-[12px]', err ? 'text-red-500' : 't3')}>{err || 'Enter the code shown at the top of their flow.'}</div>
+      </div>
+      <input
+        className="input !w-44 text-center font-mono text-[14px] uppercase tracking-[0.2em]"
+        placeholder="FLOW CODE"
+        maxLength={9}
+        value={code}
+        onChange={(e) => {
+          setCode(normalizeRoomCode(e.target.value));
+          setErr('');
+        }}
+        data-testid="join-code"
+      />
+      <button className="btn btn-outline !px-4" disabled={busy || code.length < 8} data-testid="join-flow">
+        {busy ? 'Joining…' : 'Join'}
+      </button>
+    </form>
   );
 }
 
 type Sort = 'updated' | 'name' | 'created';
 
 export function DocList({ kind }: { kind: DocKind }) {
-  const { code = '' } = useParams();
   const nav = useNavigate();
-  const sync = roomIndex(code);
+  const sync = homeIndex();
   const status = useStore(sync.status);
-  const em = entriesMap(sync.doc);
-  useY(em, true);
+  useY(entriesMap(sync.doc), true);
   const [q, setQ] = useState('');
   const [sort, setSort] = useState<Sort>('updated');
   const [creating, setCreating] = useState(false);
   const [menu, setMenu] = useState<{ x: number; y: number; e: Entry } | null>(null);
   const all = readEntries(sync.doc);
   const templates = all.filter((e) => e.kind === 'template').sort((a, b) => a.name.localeCompare(b.name));
+  const flowCount = all.filter((e) => e.kind === 'flow').length;
   const list = useMemo(() => {
     const ql = q.trim().toLowerCase();
     const xs = all.filter((e) => e.kind === kind && (!ql || e.name.toLowerCase().includes(ql)));
@@ -90,49 +120,59 @@ export function DocList({ kind }: { kind: DocKind }) {
     return xs;
   }, [JSON.stringify(all), q, sort, kind]);
 
-  const path = (e: Entry) => `/r/${code}/${kind === 'flow' ? 'f' : 't'}/${e.id}`;
   const label = kind === 'flow' ? 'flow' : 'template';
+
+  const open = async (e: Entry) => {
+    if (e.kind === 'template') return nav(`/t/${e.id}`);
+    const code = e.code ?? (await ensureFlowCode(e));
+    nav(`/f/${code}`);
+  };
 
   const act = {
     rename: async (e: Entry) => {
       const v = await promptDialog(`Rename ${label}`, e.name);
-      if (v) await renameDoc(code, e.id, v);
+      if (v) await renameEntry(e, v);
     },
     duplicate: async (e: Entry) => {
-      const id = await duplicateDoc(code, e.id, `${e.name} (copy)`, e.kind);
+      await duplicateEntry(e);
       toast('Duplicated');
-      void id;
     },
     remove: async (e: Entry) => {
-      if (await confirmDialog(`Delete “${e.name}”?`, `This permanently deletes the ${label} for both of you. This can't be undone.`, 'Delete', true)) {
-        await deleteDocEntry(code, e.id);
-        toast(`Deleted “${e.name}”`);
+      const body =
+        e.kind === 'template'
+          ? "This permanently deletes the template. This can't be undone."
+          : e.joined
+            ? 'This removes it from your dashboard. Your partner still has it, and you can rejoin with its code.'
+            : "This permanently deletes the flow, including for anyone you shared its code with. This can't be undone.";
+      const ok = await confirmDialog(`${e.joined ? 'Remove' : 'Delete'} “${e.name}”?`, body, e.joined ? 'Remove' : 'Delete', true);
+      if (ok) {
+        await deleteEntry(e);
+        toast(`${e.joined ? 'Removed' : 'Deleted'} “${e.name}”`);
       }
     },
     useTemplate: async (e: Entry) => {
-      const n = all.filter((x) => x.kind === 'flow').length + 1;
-      const id = await createDoc(code, { name: `Round ${n}`, mode: e.mode, kind: 'flow', fromId: e.id });
-      nav(`/r/${code}/f/${id}`);
+      const code = await createFlow({ name: `Round ${flowCount + 1}`, mode: e.mode, from: locOf(e) });
+      nav(`/f/${code}`);
     },
   };
 
   const newTemplate = async () => {
     const v = await promptDialog('New template', 'My case', 'Create');
     if (!v) return;
-    const id = await createDoc(code, { name: v, mode: 'aff', kind: 'template' });
-    nav(`/r/${code}/t/${id}`);
+    const id = await createTemplate({ name: v, mode: 'aff' });
+    nav(`/t/${id}`);
   };
 
   return (
     <div className="flex h-full flex-col">
-      <RoomHeader code={code} />
+      <HomeHeader />
       <main className="mx-auto w-full max-w-5xl flex-1 overflow-auto px-6 py-8">
         <div className="mb-6 flex items-end justify-between gap-4">
           <div>
-            <h1 className="text-[22px] font-semibold tracking-tight">{kind === 'flow' ? 'Flows' : 'Templates'}</h1>
+            <h1 className="text-[22px] font-semibold tracking-tight">{kind === 'flow' ? 'Your flows' : 'Templates'}</h1>
             <p className="t2 mt-1 text-[13px]">
               {kind === 'flow'
-                ? 'Every round your team has flowed. Shared live with anyone in this room.'
+                ? 'Open a flow to get its code, then share the code with your partner to flow together live.'
                 : 'Preflow skeletons: tabs, mode and prepared case/blocks. Start a new flow from any of them.'}
             </p>
           </div>
@@ -140,6 +180,7 @@ export function DocList({ kind }: { kind: DocKind }) {
             <Icon.plus /> New {label}
           </button>
         </div>
+        {kind === 'flow' && <JoinBox />}
         <div className="mb-4 flex items-center gap-3">
           <div className="relative flex-1">
             <span className="t3 absolute left-3 top-1/2 -translate-y-1/2">
@@ -168,7 +209,7 @@ export function DocList({ kind }: { kind: DocKind }) {
               {q
                 ? 'Try a different search.'
                 : kind === 'flow'
-                  ? 'Create your first flow. Your partner will see it here the moment it exists.'
+                  ? 'Create a flow, or join your partner’s with the code from their flow.'
                   : 'Build a template with your case already in the constructive column, or open a flow and click “Save as template”.'}
             </div>
             {!q && (
@@ -176,7 +217,6 @@ export function DocList({ kind }: { kind: DocKind }) {
                 <Icon.plus /> New {label}
               </button>
             )}
-            {!status.serverSynced && status.net !== 'offline' && transport.kind !== 'local' && <div className="t3 mt-4 text-[12px]">Checking the room for {label}s…</div>}
           </div>
         ) : (
           <div className="panel divide-y overflow-hidden rounded-xl" style={{ borderColor: 'var(--border)' }}>
@@ -185,7 +225,7 @@ export function DocList({ kind }: { kind: DocKind }) {
                 key={e.id}
                 className="group flex cursor-pointer items-center gap-4 px-4 py-3 transition-colors hover:bg-[var(--hover-bg)]"
                 style={{ borderColor: 'var(--border)' }}
-                onClick={() => nav(path(e))}
+                onClick={() => open(e)}
                 onContextMenu={(ev) => {
                   ev.preventDefault();
                   setMenu({ x: ev.clientX, y: ev.clientY, e });
@@ -196,8 +236,10 @@ export function DocList({ kind }: { kind: DocKind }) {
                   <div className="truncate text-[14px] font-medium">{e.name}</div>
                   <div className="t3 mt-0.5 text-[12px]">
                     Edited {timeAgo(e.updatedAt)} · created {new Date(e.createdAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
+                    {e.code && <span className="ml-2 font-mono tracking-wider">{e.code}</span>}
                   </div>
                 </div>
+                {e.joined && <span className="t2 rounded-md bg-[var(--panel-2)] px-2 py-0.5 text-[11.5px] font-medium">Shared with you</span>}
                 <ModeBadge mode={e.mode} />
                 {kind === 'template' && (
                   <button
@@ -227,17 +269,28 @@ export function DocList({ kind }: { kind: DocKind }) {
       </main>
       {menu && (
         <Menu x={menu.x} y={menu.y} onClose={() => setMenu(null)}>
-          <MenuItem onClick={() => (setMenu(null), nav(path(menu.e)))}>Open</MenuItem>
+          <MenuItem onClick={() => (setMenu(null), open(menu.e))}>Open</MenuItem>
           {kind === 'template' && <MenuItem onClick={() => (setMenu(null), act.useTemplate(menu.e))}>New flow from template</MenuItem>}
+          {menu.e.code && (
+            <MenuItem
+              onClick={() => {
+                navigator.clipboard?.writeText(menu.e.code!);
+                toast('Flow code copied');
+                setMenu(null);
+              }}
+            >
+              Copy flow code
+            </MenuItem>
+          )}
           <MenuItem onClick={() => (setMenu(null), act.rename(menu.e))}>Rename</MenuItem>
           <MenuItem onClick={() => (setMenu(null), act.duplicate(menu.e))}>Duplicate</MenuItem>
           <MenuSep />
           <MenuItem danger onClick={() => (setMenu(null), act.remove(menu.e))}>
-            Delete
+            {menu.e.joined ? 'Remove from dashboard' : 'Delete'}
           </MenuItem>
         </Menu>
       )}
-      {creating && <NewFlowDialog code={code} templates={templates} count={all.filter((e) => e.kind === 'flow').length} onClose={() => setCreating(false)} />}
+      {creating && <NewFlowDialog templates={templates} count={flowCount} onClose={() => setCreating(false)} />}
     </div>
   );
 }
@@ -253,18 +306,19 @@ export function ModeBadge({ mode }: { mode: Mode }) {
   );
 }
 
-function NewFlowDialog({ code, templates, count, onClose }: { code: string; templates: Entry[]; count: number; onClose: () => void }) {
+function NewFlowDialog({ templates, count, onClose }: { templates: Entry[]; count: number; onClose: () => void }) {
   const nav = useNavigate();
   const [name, setName] = useState(`Round ${count + 1}`);
   const [mode, setMode] = useState<Mode>('aff');
   const [tpl, setTpl] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const tplEntry = templates.find((t) => t.id === tpl);
   const submit = async () => {
     if (busy) return;
     setBusy(true);
-    const id = await createDoc(code, { name: name.trim() || `Round ${count + 1}`, mode, kind: 'flow', fromId: tpl });
+    const code = await createFlow({ name: name.trim() || `Round ${count + 1}`, mode, from: tplEntry ? locOf(tplEntry) : null });
     onClose();
-    nav(`/r/${code}/f/${id}`);
+    nav(`/f/${code}`);
   };
   return (
     <Modal onClose={onClose} title="New flow" width={480}>
@@ -305,8 +359,8 @@ function NewFlowDialog({ code, templates, count, onClose }: { code: string; temp
               </option>
             ))}
           </select>
-          {tpl && templates.find((t) => t.id === tpl)?.mode !== mode && (
-            <div className="t3 mt-1.5 text-[12px]">This template was built {templates.find((t) => t.id === tpl)?.mode === 'aff' ? 'Aff' : 'Con'}-first; cells keep their column positions (constructives stay in column one).</div>
+          {tplEntry && tplEntry.mode !== mode && (
+            <div className="t3 mt-1.5 text-[12px]">This template was built {tplEntry.mode === 'aff' ? 'Aff' : 'Con'}-first; cells keep their column positions (constructives stay in column one).</div>
           )}
         </div>
         <div className="flex justify-end gap-2 pt-1">
