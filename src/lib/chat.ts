@@ -34,13 +34,9 @@ export function markRead(room: string, at = serverNow()) {
 }
 export function hasUnread(d: Y.Doc, room: string): boolean {
   const since = lastRead(room);
-  const arr = chatArray(d);
-  for (let i = arr.length - 1; i >= 0; i--) {
-    const m = arr.get(i);
-    if (m.at <= since) break;
-    if (m.client !== clientKey) return true;
-  }
-  return false;
+  return chatArray(d)
+    .toArray()
+    .some((m) => m.at > since && m.client !== clientKey);
 }
 
 /** cell id -> attached message ids, kept up to date for cell markers. */

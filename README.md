@@ -40,8 +40,8 @@ npm run preview              # http://localhost:4173
 
 ## Setup steps you do by hand
 
-1. **Supabase.** A free-tier project named `pf-flow` (ref `mlfarkjibpcnxcfozbly`) has already been created in your FirstDibs org, and `supabase/schema.sql` has been applied to it.
-   * To use a different project, open its SQL Editor and run `supabase/schema.sql`. Then copy *Project URL* and the *publishable* (or legacy anon) key from **Settings → API**.
+1. **Supabase.** A free-tier project named `pf-flow` (ref `mlfarkjibpcnxcfozbly`) has already been created in your FirstDibs org, and both SQL files have been applied to it: `supabase/schema.sql` (flows) and `supabase/002_history.sql` (version history).
+   * To use a different project, open its SQL Editor and run `supabase/schema.sql`, then `supabase/002_history.sql`. Then copy *Project URL* and the *publishable* (or legacy anon) key from **Settings → API**.
    * Free projects pause after about a week of inactivity. Un-pause from the Supabase dashboard if the app shows "Connecting…" forever.
 2. **Vercel.** Import the `FirstDibsChagrin/PF-Flow` GitHub repo (leave Root Directory blank) and set:
    * Framework preset: Vite (build `npm run build`, output `dist`). `vercel.json` already handles SPA routing.
@@ -72,8 +72,27 @@ npm run preview              # http://localhost:4173
   * If you click and leave without typing, nothing is left behind.
 * **Cells** work like Flower. A cell's responses sit in the next column on the same row, so a whole argument chain lines up horizontally.
 * **Marks:** dropped (red, struck through), extended (green), and turned (purple). Use Alt+1/2/3, or right-click a cell.
-* **Round info** (the ⓘ button in the flow header) holds opponent, judge, tournament, round, my side, result, speaker points, ballot notes and judge feedback. It's synced live with your partner and merges character by character, like cells. Speaking order there is the same setting as the header toggle.
+* **Side panels:** the icon strip on the right edge of a flow opens Round info, the tracker, extensions, chat and history. Only one is open at a time, and the grid narrows to make room (it scrolls sideways as usual).
+* **Round info** (the ⓘ button in the flow header, or Alt+I) holds opponent, judge, tournament, round, my side, result, speaker points, ballot notes and judge feedback. It's synced live with your partner and merges character by character, like cells. Speaking order there is the same setting as the header toggle.
 * **Dashboard filters:** chips for my side, result, speaking order, tournament, judge and opponent (the last three list the values in your flows). Filters combine with AND, and a flow with no result counts as Pending. Search also matches opponent, judge, tournament and round. Cards show the key round info and pick up your partner's edits from the server.
+* **Undo/redo** only ever undoes *your own* edits (Yjs per-origin undo), so you can't undo your partner's work. Quick typing in a cell is one step; moving to another cell, or pausing, starts a new one. Restores from history are undoable too.
+* **Version history** (Alt+H):
+  * A version is saved automatically about every 5 minutes while someone is editing. **Save version** makes a named one.
+  * Each version shows when it was made and who changed what since the one before, for example "Bea edited Con tab (Con Summary)". This comes from a compact activity log kept in the flow (newest ~300 entries).
+  * Click a version for a read-only preview of any tab. **Restore this tab** or **Restore whole flow** first saves a version named "Before restore", then applies the restore as a normal synced edit, and your partner gets a notice. Whole-flow restore replaces the tabs and speaking order; Round info, chat, extensions and tracker checkboxes are kept.
+  * Retention (enforced by the server): every automatic version for 48 hours, then the newest one per hour up to 14 days, then one per day, capped at 150 automatic versions per flow. Named versions (including "Before restore") are never deleted automatically.
+  * Versions are stored online. Saving one while offline queues it on the device and uploads it when you reconnect.
+* **Partner chat** (Alt+M): a per-flow chat that only people in the flow can see. It persists with the flow and works offline (messages send when you reconnect).
+  * A dot on the chat icon means your partner wrote while the panel was closed.
+  * To attach a message to a cell, select the cell, open chat and tick **Attach to cell**. A small marker appears on the cell: click it to open the message. Click the cell link under a message to jump to the cell.
+* **Extensions** (Alt+E): prewritten extensions for your own constructive, read aloud in Summary and Final Focus.
+  * Aff and Con lists, switched inside the panel (it starts on "My side" from Round info). Each entry has an optional title plus a plain-text Summary version and Final Focus version. Reorder with the arrows; delete with the bin.
+  * Click an entry for a large reading view with a Summary/Final Focus switch. **Edit** changes the text, live for both of you. **A− / A+** sets the reading size on this device (default 24 px; it's separate from the grid font size).
+  * Extensions are part of templates (the template editor has the same panel). A flow made from a template gets its own copy, so edits during a round only change the flow. **Push changes to template** (bottom of the panel) overwrites the template's extensions with the flow's after a confirmation. It only appears for your own templates, because templates are personal. Otherwise **Save as template** saves the flow, extensions included.
+* **Drop/extend tracker** (Alt+T): lists every argument on every tab and how far each side carried it.
+  * Each argument and each response gets chips for Rebuttal, Summary and Final Focus. Green = marked Extended. Grey = written but not marked. Dashed = missing. Struck through = not applicable on that tab. Red **!** = a gap (extended earlier, not here).
+  * By default it lists arguments extended at least once (or whose responses were). **Show all** adds the rest.
+  * Click an argument or a chip to jump to that cell. The **Covered: Sum / FF** boxes and the short **note** are a checklist that syncs live.
 * **Templates** are personal (on your dashboard). Build one in the Templates tab, or click **Save as template** in any flow. Start a flow from a template in the New flow dialog or with a template's **New flow from this** button. The copy is independent of the template. A template used in the other mode keeps column positions, so constructives stay in column 1.
 * **Timers:** these sit in the bottom bar and are synced through the flow, using a server-calibrated clock. They cover every PF speech and crossfire, plus Aff and Con prep. Default lengths are 4/4/3/2 minutes for speeches, 3:00 for crossfires, and 3:00 prep. Change lengths in Settings: inside a flow you edit that flow's lengths, which are shared with your partner. On the dashboard you edit the defaults for your new flows. When time runs out the bar flashes, and there's an optional beep (speaker icon).
 * **Settings** (gear icon): your name and cursor color, theme (system/light/dark), cell font size (12–20 px), reset column widths (drag a column header's right edge to resize), timer sound, and timer lengths.
@@ -119,7 +138,8 @@ npm run preview              # http://localhost:4173
 | Mod+Shift+X | Cross out |
 | Backspace (empty cell) | Delete the cell |
 | Mod+Backspace | Delete the cell and its responses |
-| Mod+Z / Mod+Shift+Z | Undo / redo (undoes only your own edits) |
+| Mod+Z | Undo your own last edit (never your partner's); quick typing in a cell undoes as one step |
+| Mod+Shift+Z or Mod+Y | Redo |
 
 **Tabs and timers**
 
@@ -130,6 +150,52 @@ npm run preview              # http://localhost:4173
 | Alt+N / Alt+P | Next / previous speech |
 | Alt+R | Reset the speech timer |
 | Alt+A / Alt+C | Start / pause Aff / Con prep |
+
+**Side panels** (one open at a time, on the right)
+
+| Keys | Action |
+| --- | --- |
+| Alt+I | Round info |
+| Alt+T | Drop/extend tracker |
+| Alt+E | Extensions (also in the template editor) |
+| Alt+M | Partner chat |
+| Alt+H | Version history |
+| Esc | Close the panel, or leave a version preview |
+
+**Extensions panel** (panel open, not typing)
+
+| Keys | Action |
+| --- | --- |
+| ↑ / ↓ (or K / J) | Select previous / next extension |
+| ↵ or Space | Open / close the selected extension |
+| S / F | Show the Summary / Final Focus version |
+| E | Edit the open extension |
+| Esc | Stop editing, then back to the list |
+
+**Chat box**
+
+| Keys | Action |
+| --- | --- |
+| ↵ | Send |
+| Shift+↵ | New line |
+
+## How the tracker infers "extended"
+
+The tracker only reads the Extended and Dropped marks plus row alignment. The rules (unit-tested in `src/lib/tracker.test.ts`, run with `npm test`):
+
+1. **Argument** = the first cell with text along a row. Usually that's the top-level cell; for a row that starts in a later column (blank placeholders before it), it's the first cell with text. Its column decides which side made it.
+2. **The arguing side's later cells** are all cells of that side anywhere in the argument's row, including frontlines written under a response.
+3. **Response** = the first cell of the other side along a branch under the argument. The other side's later cells under it are that response's own extensions.
+4. A side **extended** an item in a speech if some cell of that speech in the item's row is marked Extended, or is an Extend (→, Mod+E) cell. A cell that's there but not marked counts as "written, not marked", not as extended. Speeches before the item, or that aren't a column on that tab, are n/a. (For example, on the first-speaking team's own tab there is no column for its own Rebuttal.)
+5. **Gap** = a speech that isn't extended after an earlier speech that was (Rebuttal → Summary → Final Focus).
+6. **Dropped** cells never count. Dropped arguments and responses aren't listed.
+
+## Where data lives
+
+* Flows (cells, tabs, Round info, chat, extensions, tracker checkboxes, activity log) are one shared document per flow code: live sync over Supabase Realtime, saved in Postgres, and cached on each device for offline use.
+* Versions are rows in `flow_snapshots`, reachable only with the flow's code.
+* **Your dashboard and templates are per person, not shared with your partner.** They live under your private home code (Settings → "Your dashboard on another device"). Your partner sees a flow only after joining it by its code, and never sees your templates.
+* Per-device settings (theme, font sizes, column widths, name, cursor color) stay in the browser.
 
 ## Choices where the spec and Flower differ
 

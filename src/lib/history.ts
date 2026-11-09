@@ -59,12 +59,12 @@ function classify(d: Y.Doc, t: Y.AbstractType<any>): { node?: string; area?: str
     if (parent === nodes) return { node: x._item.parentSub };
     if (x === d.getMap('round') || parent === d.getMap('round')) return { area: 'Round info' };
     if (x === d.getMap('ext') || parent === d.getMap('ext')) return { area: 'Extensions' };
-    if (x === d.getMap('tracker') || parent === d.getMap('tracker')) return { area: 'Tracker' };
+    if (x === d.getMap('tracker2') || parent === d.getMap('tracker2')) return { area: 'Tracker' };
     x = parent;
   }
   if (t === d.getMap('round')) return { area: 'Round info' };
   if (t === d.getMap('ext')) return { area: 'Extensions' };
-  if (t === d.getMap('tracker')) return { area: 'Tracker' };
+  if (t === d.getMap('tracker2')) return { area: 'Tracker' };
   return {};
 }
 

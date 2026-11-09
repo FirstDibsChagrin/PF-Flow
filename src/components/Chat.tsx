@@ -24,7 +24,7 @@ export function ChatPanel({ editor, onClose }: { editor: FlowEditor; onClose: ()
   const doc = editor.doc;
   const arr = chatArray(doc);
   useY(arr);
-  const msgs = arr.toArray();
+  const msgs = arr.toArray().sort((a, b) => a.at - b.at); // offline messages merge in by send time
   const meName = useSettings((s) => s.name);
   const meColor = useSettings((s) => s.color);
   const lastCell = useStore(editor.lastCell);

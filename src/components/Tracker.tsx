@@ -37,26 +37,14 @@ export function sheetForTracker(editor: FlowEditor, sheetId: string): TSheet {
 }
 
 // ---------- shared checklist state ----------
-const trackerMap = (d: Y.Doc) => d.getMap<Y.Map<any>>('tracker');
-function entry(d: Y.Doc, id: string): Y.Map<any> {
-  let m = trackerMap(d).get(id);
-  if (!m) {
-    m = new Y.Map();
-    const mm = m;
-    d.transact(() => trackerMap(d).set(id, mm), LOCAL);
-    m = trackerMap(d).get(id)!;
-  }
-  return m;
-}
+// Flat keys ("<cellId>:sum", "<cellId>:ff", "<cellId>:note") so two people ticking/typing the same
+// item at once (even offline) never replace each other's data.
+const trackerMap = (d: Y.Doc) => d.getMap<any>('tracker2');
+const key = (id: string, f: 'sum' | 'ff' | 'note') => `${id}:${f}`;
 function noteText(d: Y.Doc, id: string): Y.Text {
-  const m = entry(d, id);
-  let t = m.get('note');
-  if (!(t instanceof Y.Text)) {
-    t = new Y.Text();
-    d.transact(() => m.set('note', t), LOCAL);
-    t = m.get('note');
-  }
-  return t;
+  const m = trackerMap(d);
+  if (!(m.get(key(id, 'note')) instanceof Y.Text)) d.transact(() => m.set(key(id, 'note'), new Y.Text()), LOCAL);
+  return m.get(key(id, 'note'));
 }
 
 const SPEECH_LABEL = { R: 'Reb', S: 'Sum', F: 'FF' } as const;
@@ -92,15 +80,12 @@ function ChipView({ c, editor }: { c: Chip; editor: FlowEditor }) {
 function ItemRow({ it, editor, small }: { it: TItem; editor: FlowEditor; small?: boolean }) {
   const doc = editor.doc;
   const tm = trackerMap(doc);
-  useY(tm.get(it.id) ?? null);
   useY(tm);
-  const st = tm.get(it.id);
+  const note = tm.get(key(it.id, 'note'));
+  useY(note instanceof Y.Text ? note : null);
   const [noteOpen, setNoteOpen] = useState(false);
-  const hasNote = st?.get('note') instanceof Y.Text && (st.get('note') as Y.Text).length > 0;
-  const toggle = (k: 'sum' | 'ff') => {
-    const m = entry(doc, it.id);
-    doc.transact(() => m.set(k, !m.get(k)), LOCAL);
-  };
+  const hasNote = note instanceof Y.Text && note.length > 0;
+  const toggle = (k: 'sum' | 'ff') => doc.transact(() => tm.set(key(it.id, k), !tm.get(key(it.id, k))), LOCAL);
   const sideColor = it.side === 'aff' ? 'var(--aff)' : 'var(--con)';
   return (
     <div className={cls('rounded-lg py-1.5', small ? 'pl-3' : 'pl-2')} data-testid={small ? 'trk-response' : 'trk-arg'} data-item={it.id}>
@@ -117,11 +102,11 @@ function ItemRow({ it, editor, small }: { it: TItem; editor: FlowEditor; small?:
         <span className="ml-auto flex items-center gap-2 pr-1 text-[11.5px]">
           <span className="t3">Covered:</span>
           <label className="t2 flex cursor-pointer items-center gap-1" title="I covered this in my Summary">
-            <input type="checkbox" className="accent-[var(--accent)]" checked={!!st?.get('sum')} onChange={() => toggle('sum')} data-testid="chk-sum" />
+            <input type="checkbox" className="accent-[var(--accent)]" checked={!!tm.get(key(it.id, 'sum'))} onChange={() => toggle('sum')} data-testid="chk-sum" />
             Sum
           </label>
           <label className="t2 flex cursor-pointer items-center gap-1" title="I covered this in my Final Focus">
-            <input type="checkbox" className="accent-[var(--accent)]" checked={!!st?.get('ff')} onChange={() => toggle('ff')} data-testid="chk-ff" />
+            <input type="checkbox" className="accent-[var(--accent)]" checked={!!tm.get(key(it.id, 'ff'))} onChange={() => toggle('ff')} data-testid="chk-ff" />
             FF
           </label>
           <button className={cls('btn !px-1 !py-0 text-[11.5px]', hasNote ? 'text-[var(--accent)]' : 't3')} onClick={() => {
@@ -132,9 +117,9 @@ function ItemRow({ it, editor, small }: { it: TItem; editor: FlowEditor; small?:
           </button>
         </span>
       </div>
-      {(noteOpen || hasNote) && st?.get('note') instanceof Y.Text && (
+      {(noteOpen || hasNote) && note instanceof Y.Text && (
         <div className="ml-3 mt-1 pr-1">
-          <YTextInput doc={doc} ytext={st.get('note') as Y.Text} placeholder="Short note…" className="input !py-1 text-[12px]" testid="trk-note" autoFocus={noteOpen && !hasNote} />
+          <YTextInput doc={doc} ytext={note} placeholder="Short note…" className="input !py-1 text-[12px]" testid="trk-note" autoFocus={noteOpen && !hasNote} />
         </div>
       )}
     </div>

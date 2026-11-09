@@ -76,6 +76,38 @@ export const SHORTCUT_GROUPS: { name: string; context: string; items: [string[],
       [[A, 'C'], 'Start / pause Con prep'],
     ],
   },
+  {
+    name: 'Side panels',
+    context: 'Anywhere in a flow (one panel open at a time)',
+    items: [
+      [[A, 'I'], 'Round info'],
+      [[A, 'T'], 'Drop/extend tracker'],
+      [[A, 'E'], 'Extensions (also in the template editor)'],
+      [[A, 'M'], 'Partner chat'],
+      [[A, 'H'], 'Version history'],
+      [['Esc'], 'Close the panel (or leave a version preview)'],
+    ],
+  },
+  {
+    name: 'Extensions panel',
+    context: 'When the panel is open and you are not typing',
+    items: [
+      [['↑ / ↓'], 'Select previous / next extension (also K / J)'],
+      [['↵'], 'Open / close the selected extension (also Space)'],
+      [['S'], 'Show the Summary version'],
+      [['F'], 'Show the Final Focus version'],
+      [['E'], 'Edit the open extension'],
+      [['Esc'], 'Stop editing, then back to the list'],
+    ],
+  },
+  {
+    name: 'Chat',
+    context: 'In the chat box',
+    items: [
+      [['↵'], 'Send'],
+      [['Shift', '↵'], 'New line'],
+    ],
+  },
 ];
 
 export function ShortcutsHost() {
