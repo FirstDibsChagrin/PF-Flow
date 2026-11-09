@@ -23,6 +23,9 @@ import {
   type SheetKind,
 } from './model';
 
+/** Origin for cells created speculatively (click/→ to the right of an argument). Not undo-tracked. */
+const PROVISIONAL = Symbol('provisional');
+
 export interface Focus {
   sheet: string | null;
   node: string | null;
@@ -80,13 +83,17 @@ export class FlowEditor {
   // ---------- focus ----------
   setFocus(node: string | null, caret: 'end' | 'start' | 'keep' = 'end') {
     this.caretHint = caret;
-    if (node !== this.focus.get().node) this.undo.stopCapturing();
+    if (node !== this.focus.get().node) {
+      this.undo.stopCapturing();
+      this.cleanupProvisional(node);
+    }
     if (!node) return this.blur();
     const sheet = getNode(this.doc, node)?.get('sheet') ?? null;
     if (sheet && sheet !== this.activeSheet.get()) this.activeSheet.set(sheet);
     this.focus.set({ sheet, node });
   }
   blur() {
+    this.cleanupProvisional(null);
     const f = this.focus.get();
     if (f.node) this.focus.set({ sheet: f.sheet, node: null });
   }
@@ -217,6 +224,43 @@ export class FlowEditor {
     });
     if (nid) this.setFocus(nid);
     return nid;
+  }
+
+  // ---------- responding in the same row ----------
+  private provisional = new Set<string>();
+
+  /**
+   * Start typing directly to the right of an argument (same row, next column).
+   * The new cell is provisional: if you leave it without typing anything it disappears again.
+   */
+  respond(id: string): string | null {
+    let nid: string | null = null;
+    this.doc.transact(() => {
+      nid = this.addChild(id);
+    }, PROVISIONAL);
+    if (nid) this.provisional.add(nid);
+    return nid;
+  }
+
+  private cleanupProvisional(keep: string | null) {
+    if (!this.provisional.size) return;
+    for (const id of [...this.provisional]) {
+      if (id === keep) continue;
+      this.provisional.delete(id);
+      const n = getNode(this.doc, id);
+      if (!n) continue;
+      const blank = (n.get('text') as Y.Text).length === 0 && !n.get('mark') && liveChildren(this.doc, id).length === 0;
+      if (!blank) continue;
+      this.doc.transact(() => {
+        let parent = this.parentOf(id);
+        deleteCell(this.doc, id);
+        while (parent && !parent.startsWith(ROOT) && getNode(this.doc, parent)?.get('empty') && liveChildren(this.doc, parent).length === 0) {
+          const pp = this.parentOf(parent);
+          deleteCell(this.doc, parent);
+          parent = pp;
+        }
+      }, PROVISIONAL);
+    }
   }
 
   /** New argument starting in a given column (column header "+"). */

@@ -142,16 +142,44 @@ const NodeView = memo(function NodeView({ id, level, ctx }: { id: string; level:
       <div className="shrink-0 overflow-hidden" style={{ width }}>
         {empty || width === 0 ? <div style={{ height: empty ? 4 : 0 }} /> : <Cell id={id} n={n} level={level} ctx={ctx} />}
       </div>
-      {childIds.length > 0 && (
+      {childIds.length > 0 ? (
         <div className="flex flex-col">
           {childIds.map((c) => (
             <NodeView key={c} id={c} level={level + 1} ctx={ctx} />
           ))}
         </div>
+      ) : (
+        !empty &&
+        width > 0 &&
+        level + 1 < ctx.columns.length && <RespondSlot id={id} level={level} ctx={ctx} />
       )}
     </div>
   );
 });
+
+/** The empty space directly to the right of an argument: click to type a response in that row. */
+function RespondSlot({ id, level, ctx }: { id: string; level: number; ctx: Ctx }) {
+  // skip over hidden columns to find the next visible column's width
+  let next = level + 1;
+  while (next < ctx.widths.length && ctx.widths[next] === 0) next++;
+  if (next >= ctx.widths.length) return null;
+  return (
+    <div
+      className="group/slot flex shrink-0 cursor-text self-stretch px-1 py-[3px]"
+      style={{ width: ctx.widths[next] }}
+      onMouseDown={(e) => {
+        e.preventDefault();
+        ctx.editor.respond(id);
+      }}
+      title="Click to respond in this row"
+      data-respond={id}
+    >
+      <div className="respond-slot flex-1">
+        <span className="t3 opacity-0 transition-opacity group-hover/slot:opacity-100">+ respond</span>
+      </div>
+    </div>
+  );
+}
 
 const ALT_COLORS = ['#f59e0b', '#10b981', '#ec4899'];
 function useRemoteOn(store: Store<PresenceState[]>, id: string) {
@@ -256,7 +284,11 @@ function Cell({ id, n, level, ctx }: { id: string; n: Y.Map<any>; level: number;
     if (plain && k === 'ArrowUp') return done(), void editor.focusAdjacent(id, 'up');
     if (plain && k === 'ArrowDown') return done(), void editor.focusAdjacent(id, 'down');
     if (plain && k === 'ArrowLeft') return done(), void editor.focusParent(id);
-    if (plain && k === 'ArrowRight') return done(), void editor.focusChild(id);
+    if (plain && k === 'ArrowRight') {
+      done();
+      if (!editor.focusChild(id)) editor.respond(id);
+      return;
+    }
     if (k === 'Tab' && !mod && !e.altKey) return done(), void editor.focusSibling(id, e.shiftKey ? -1 : 1);
     if (k === 'Enter') {
       done();

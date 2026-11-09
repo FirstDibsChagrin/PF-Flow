@@ -276,3 +276,16 @@ body {
 .fadein {
   animation: fadein 140ms ease-out;
 }
+
+.respond-slot {
+  min-height: 31px;
+  padding: 5px 8px;
+  border-radius: 6px;
+  cursor: text;
+  font-size: var(--cell-font);
+  line-height: 1.45;
+  transition: background-color 120ms ease;
+}
+.group\/slot:hover .respond-slot {
+  background: var(--hover-bg);
+}

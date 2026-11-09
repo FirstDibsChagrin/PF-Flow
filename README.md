@@ -59,6 +59,7 @@ npm run preview              # http://localhost:4173
   * Second team's sheet: Const → both Rebuttals → Summaries → Final Focuses (7 columns).
   * Extra tabs: all 8 speeches in speaking order. No crossfire columns.
   * Switching mode keeps every cell in its column position. If a sheet loses a column, cells in it are hidden (not deleted) until you switch back, and you're warned first.
+* **Responding in the same row:** click the empty space directly to the right of any argument (or press → in it) and start typing. If you leave without typing, the empty cell disappears.
 * **Cells** work like Flower. A cell's responses sit in the next column on the same row, so a whole argument chain lines up horizontally.
 * **Marks:** dropped (red, struck through), extended (green), and turned (purple). Use Alt+1/2/3, or right-click a cell.
 * **Templates:** build one in the Templates tab, or click **Save as template** in any flow. Start a flow from a template in the New flow dialog or with a template's **New flow from this** button. The copy is independent of the template. A template used in the other mode keeps column positions, so constructives stay in column 1.
@@ -75,7 +76,7 @@ npm run preview              # http://localhost:4173
 | --- | --- |
 | ↑ / ↓ | Cell above / below in the same column (crosses argument boundaries) |
 | ← | Parent (the argument this responds to) |
-| → | First response in the next column |
+| → | First response in the next column. If there's none yet, starts one in the same row |
 | Tab / Shift+Tab | Next / previous sibling |
 | Esc | Leave the cell |
 | ↑ ↓ ← → or ↵ (no cell focused) | Jump back into the flow |
@@ -91,6 +92,7 @@ npm run preview              # http://localhost:4173
 | Alt+↵ | Go to the previous sibling, or create a new cell above if there is none |
 | Alt+Shift+↵ | Respond to the next argument |
 | Mod+E | Extend: carry the argument into the next column with an → cell |
+| Click the empty space right of a cell | Type a response in that same row |
 | Click a line between cells | Insert there |
 | **+** on a column header | Start a new argument in that column |
 
