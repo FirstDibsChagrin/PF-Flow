@@ -1,20 +1,35 @@
 import { useEffect, useLayoutEffect, useRef } from 'react';
 import * as Y from 'yjs';
 import { setText, type Mode } from '../lib/model';
-import { readSummary, roundMap, roundText, setRoundValue, RESULT_LABEL, type Result, type TextField } from '../lib/round';
+import { ensureRoundFields, readSummary, roundMap, roundText, setRoundValue, RESULT_LABEL, type Result, type TextField } from '../lib/round';
+import { DockFrame } from './Dock';
 import { useY } from '../lib/yhooks';
 import { cls } from '../lib/util';
-import { Icon } from './ui';
+
+function YField({ doc, field, multiline, placeholder }: { doc: Y.Doc; field: TextField; multiline?: boolean; placeholder?: string }) {
+  return <YTextInput doc={doc} ytext={roundText(doc, field)} multiline={multiline} placeholder={placeholder} testid={field} />;
+}
 
 /** A text input/textarea bound to a shared Y.Text (character-level merge, caret kept on remote edits). */
-function YField({ doc, field, multiline, placeholder }: { doc: Y.Doc; field: TextField; multiline?: boolean; placeholder?: string }) {
+export function YTextInput(props: {
+  doc: Y.Doc;
+  ytext: Y.Text;
+  multiline?: boolean;
+  placeholder?: string;
+  testid?: string;
+  className?: string;
+  minHeight?: number;
+  style?: React.CSSProperties;
+  autoFocus?: boolean;
+  onKeyDown?: (e: React.KeyboardEvent) => void;
+}) {
+  const { doc, ytext, multiline } = props;
   const ref = useRef<HTMLInputElement & HTMLTextAreaElement>(null);
-  const ytext = roundText(doc, field);
   const autosize = () => {
     const el = ref.current;
     if (!el || !multiline) return;
     el.style.height = '0px';
-    el.style.height = Math.max(76, el.scrollHeight) + 'px';
+    el.style.height = Math.max(props.minHeight ?? 76, el.scrollHeight) + 'px';
   };
   useLayoutEffect(() => {
     const el = ref.current!;
@@ -46,20 +61,23 @@ function YField({ doc, field, multiline, placeholder }: { doc: Y.Doc; field: Tex
       autosize();
     };
     ytext.observe(obs);
+    if (props.autoFocus) setTimeout(() => el.focus(), 0);
     return () => ytext.unobserve(obs);
   }, [ytext]);
-  const props = {
+  const p = {
     ref,
-    placeholder,
-    spellCheck: multiline,
-    className: cls('input', multiline && 'resize-none leading-relaxed'),
+    placeholder: props.placeholder,
+    spellCheck: !!multiline,
+    style: props.style,
+    className: props.className ?? cls('input', multiline && 'resize-none leading-relaxed'),
     onInput: (e: React.FormEvent<HTMLInputElement | HTMLTextAreaElement>) => {
       setText(doc, ytext, e.currentTarget.value);
       autosize();
     },
-    'data-field': field,
+    onKeyDown: props.onKeyDown,
+    'data-field': props.testid,
   };
-  return multiline ? <textarea {...props} rows={3} /> : <input {...props} />;
+  return multiline ? <textarea {...p} rows={3} /> : <input {...p} />;
 }
 
 function Segmented<T extends string>(props: { value: T | ''; options: { value: T; label: string; color?: string }[]; onChange: (v: T | null) => void; allowClear?: boolean; testid?: string }) {
@@ -94,25 +112,10 @@ export function RoundInfoPanel(props: { doc: Y.Doc; mode: Mode; onModeChange: (m
   useY(rm);
   const side = (rm.get('side') as 'aff' | 'con') || '';
   const result = (rm.get('result') as Result) || '';
-  useEffect(() => {
-    const k = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        e.stopPropagation();
-        props.onClose();
-      }
-    };
-    window.addEventListener('keydown', k, true);
-    return () => window.removeEventListener('keydown', k, true);
-  }, [props.onClose]);
+  useEffect(() => ensureRoundFields(doc), [doc]);
   return (
-    <aside className="slide-in absolute inset-y-0 right-0 z-30 flex w-[400px] flex-col border-l bd shadow-2xl" style={{ background: 'var(--panel)' }} data-testid="round-info">
-      <div className="flex items-center justify-between border-b bd px-5 py-3">
-        <div className="text-[15px] font-semibold">Round info</div>
-        <button className="btn -mr-2 !p-1.5" onClick={props.onClose} title="Close (Esc)">
-          <Icon.close />
-        </button>
-      </div>
-      <div className="flex-1 space-y-4 overflow-auto px-5 py-4">
+    <DockFrame title="Round info" onClose={props.onClose} testid="round-info" footer={<div className="t3 px-5 py-2.5 text-[11.5px]">Synced live with your partner.</div>}>
+      <div className="space-y-4 px-5 py-4">
         <div>
           <Label>Opponent</Label>
           <YField doc={doc} field="opponent" placeholder="School and/or names" />
@@ -187,8 +190,7 @@ export function RoundInfoPanel(props: { doc: Y.Doc; mode: Mode; onModeChange: (m
           <YField doc={doc} field="feedback" multiline placeholder="Oral feedback, things to fix…" />
         </div>
       </div>
-      <div className="t3 border-t bd px-5 py-2.5 text-[11.5px]">Synced live with your partner.</div>
-    </aside>
+    </DockFrame>
   );
 }
 

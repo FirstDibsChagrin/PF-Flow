@@ -19,6 +19,8 @@ import {
 import { bindEntry, createTemplate, FLOW_DOC, homeCode, rememberFlow } from '../lib/room';
 import { currentFlow } from './SettingsPanel';
 import { RoundInfoPanel, RoundInfoSummary } from './RoundInfo';
+import { DOCK_ITEMS, DockStrip } from './Dock';
+import { DockPanels } from './DockPanels';
 import { ensureRoundFields } from '../lib/round';
 import { useSettings } from '../lib/settings';
 import { useStore } from '../lib/store';
@@ -79,7 +81,8 @@ function FlowView({ editor, kind }: { editor: FlowEditor; kind: 'flow' | 'templa
   const mode: Mode = m.get('mode') || 'aff';
   const name: string = m.get('name') || 'Untitled';
   const missing = status.serverSynced && !m.get('name') && sheets.length === 0;
-  const [roundOpen, setRoundOpen] = useState(false);
+  const dock = useStore(editor.dock);
+  const roundOpen = dock === 'round';
   useEffect(() => {
     if (kind !== 'flow' || !m.get('name')) return;
     // create shared fields once the server copy is in (or after a short wait when offline)
@@ -118,6 +121,7 @@ function FlowView({ editor, kind }: { editor: FlowEditor; kind: 'flow' | 'templa
   );
 
   const timers = useTimerControls(doc, mode);
+  const dockDots = useDockDots(editor);
 
   // global shortcuts
   const lastFocus = useRef<string | null>(null);
@@ -140,6 +144,20 @@ function FlowView({ editor, kind }: { editor: FlowEditor; kind: 'flow' | 'templa
       if ((mod && e.key === '/') || (!inInput && !inCell && e.key === '?')) {
         e.preventDefault();
         openShortcuts();
+        return;
+      }
+      if (e.altKey && !mod && !e.shiftKey) {
+        const item = DOCK_ITEMS.find((d) => e.code === 'Key' + d.key && (kind === 'flow' || !d.flowOnly));
+        if (item) {
+          e.preventDefault();
+          if (item.id === 'round') ensureRoundFields(doc);
+          editor.toggleDock(item.id);
+          return;
+        }
+      }
+      if (e.key === 'Escape' && editor.dock.get() && !inCell && !e.defaultPrevented) {
+        e.preventDefault();
+        editor.dock.set(null);
         return;
       }
       if (e.altKey && !mod && !e.shiftKey && kind === 'flow' && !inInput) {
@@ -255,7 +273,7 @@ function FlowView({ editor, kind }: { editor: FlowEditor; kind: 'flow' | 'templa
             className={cls('btn btn-outline min-w-0 shrink whitespace-nowrap', roundOpen && 'bg-[var(--panel-2)]')}
             onClick={() => {
               ensureRoundFields(doc);
-              setRoundOpen((o) => !o);
+              editor.toggleDock('round');
             }}
             title="Round info: opponent, judge, tournament, result…"
             data-testid="round-info-btn"
@@ -294,18 +312,24 @@ function FlowView({ editor, kind }: { editor: FlowEditor; kind: 'flow' | 'templa
           </button>
         </div>
       </header>
-      <TabBar editor={editor} sheets={sheets} active={active} />
-      <div className="min-h-0 flex-1">{active && <Sheet key={active} editor={editor} sheet={active} presence={sync.presence} />}</div>
-      {kind === 'flow' && <TimerBar doc={doc} mode={mode} />}
-      {kind === 'flow' && roundOpen && (
-        <div className="pointer-events-none absolute inset-x-0 bottom-11 top-12 z-30">
-          <div className="pointer-events-auto">
-            <RoundInfoPanel doc={doc} mode={mode} onModeChange={switchMode} onClose={() => setRoundOpen(false)} />
-          </div>
+      <div className="flex min-h-0 flex-1">
+        <div className="flex min-w-0 flex-1 flex-col">
+          <TabBar editor={editor} sheets={sheets} active={active} />
+          <div className="min-h-0 flex-1">{active && <Sheet key={active} editor={editor} sheet={active} presence={sync.presence} />}</div>
         </div>
-      )}
+        {dock === 'round' && kind === 'flow' && <RoundInfoPanel doc={doc} mode={mode} onModeChange={switchMode} onClose={() => editor.dock.set(null)} />}
+        {dock && dock !== 'round' && <DockPanels editor={editor} kind={kind} panel={dock} />}
+        <DockStrip editor={editor} kind={kind} dots={dockDots} />
+      </div>
+      {kind === 'flow' && <TimerBar doc={doc} mode={mode} />}
     </div>
   );
+}
+
+/** Unread/attention dots on dock icons. */
+function useDockDots(editor: FlowEditor) {
+  void editor;
+  return {} as Partial<Record<import('../lib/editor').DockPanel, boolean>>;
 }
 
 function TabBar({ editor, sheets, active }: { editor: FlowEditor; sheets: string[]; active: string | null }) {

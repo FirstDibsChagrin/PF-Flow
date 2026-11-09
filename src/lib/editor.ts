@@ -31,8 +31,16 @@ export interface Focus {
   node: string | null;
 }
 
+export type DockPanel = 'round' | 'tracker' | 'chat' | 'ext' | 'history';
+
 export class FlowEditor {
   doc: Y.Doc;
+  /** which right-side dock panel is open (one at a time) */
+  dock = new Store<DockPanel | null>(null);
+  /** a cell briefly highlighted after "jump to" from a panel */
+  flash = new Store<string | null>(null);
+  /** read-only editors (version preview) */
+  readOnly = false;
   undo: Y.UndoManager;
   focus = new Store<Focus>({ sheet: null, node: null });
   activeSheet = new Store<string | null>(null);
@@ -59,6 +67,27 @@ export class FlowEditor {
 
   destroy() {
     this.undo.destroy();
+  }
+
+  toggleDock(p: DockPanel) {
+    this.dock.set(this.dock.get() === p ? null : p);
+  }
+
+  /** Show a cell without stealing keyboard focus from a panel: switch tab, scroll, flash. */
+  reveal(id: string) {
+    const n = getNode(this.doc, id);
+    if (!n) return false;
+    const sheet = n.get('sheet');
+    if (sheet !== this.activeSheet.get()) this.activeSheet.set(sheet);
+    this.flash.set(null);
+    setTimeout(() => {
+      this.flash.set(id);
+      document.querySelector(`[data-cell="${id}"]`)?.scrollIntoView({ block: 'center', inline: 'center', behavior: 'smooth' });
+    }, 30);
+    setTimeout(() => {
+      if (this.flash.get() === id) this.flash.set(null);
+    }, 1800);
+    return true;
   }
 
   get mode(): Mode {
