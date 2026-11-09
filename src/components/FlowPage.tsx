@@ -18,6 +18,8 @@ import {
 } from '../lib/model';
 import { bindEntry, createTemplate, FLOW_DOC, homeCode, rememberFlow } from '../lib/room';
 import { currentFlow } from './SettingsPanel';
+import { RoundInfoPanel, RoundInfoSummary } from './RoundInfo';
+import { ensureRoundFields } from '../lib/round';
 import { useSettings } from '../lib/settings';
 import { useStore } from '../lib/store';
 import { acquireDoc, releaseDoc } from '../lib/sync';
@@ -77,6 +79,16 @@ function FlowView({ editor, kind }: { editor: FlowEditor; kind: 'flow' | 'templa
   const mode: Mode = m.get('mode') || 'aff';
   const name: string = m.get('name') || 'Untitled';
   const missing = status.serverSynced && !m.get('name') && sheets.length === 0;
+  const [roundOpen, setRoundOpen] = useState(false);
+  useEffect(() => {
+    if (kind !== 'flow' || !m.get('name')) return;
+    // create shared fields once the server copy is in (or after a short wait when offline)
+    if (status.serverSynced) ensureRoundFields(doc);
+    else {
+      const t = setTimeout(() => ensureRoundFields(doc), 3000);
+      return () => clearTimeout(t);
+    }
+  }, [kind, status.serverSynced, m.get('name')]);
 
   // opening a flow by its code (or link) adds it to your dashboard
   useEffect(() => {
@@ -130,7 +142,7 @@ function FlowView({ editor, kind }: { editor: FlowEditor; kind: 'flow' | 'templa
         openShortcuts();
         return;
       }
-      if (e.altKey && !mod && !e.shiftKey && kind === 'flow') {
+      if (e.altKey && !mod && !e.shiftKey && kind === 'flow' && !inInput) {
         const c = e.code;
         const act: Record<string, () => void> = {
           KeyS: () => timers.toggle('speech'),
@@ -216,17 +228,17 @@ function FlowView({ editor, kind }: { editor: FlowEditor; kind: 'flow' | 'templa
   }
 
   return (
-    <div className="flex h-full flex-col">
+    <div className="relative flex h-full flex-col">
       {/* header */}
       <header className="flex h-12 shrink-0 items-center gap-3 border-b bd px-3" style={{ background: 'var(--panel)' }}>
         <button className="btn !px-2" onClick={() => nav(kind === 'template' ? '/templates' : '/')} title="Back to dashboard">
           <Icon.back />
         </button>
-        <button className="truncate rounded-md px-1.5 py-0.5 text-[15px] font-semibold hover:bg-[var(--hover-bg)]" onClick={rename} title="Rename" data-testid="flow-name">
+        <button className="min-w-0 shrink truncate rounded-md px-1.5 py-0.5 text-[15px] font-semibold hover:bg-[var(--hover-bg)]" onClick={rename} title="Rename" data-testid="flow-name">
           {name}
         </button>
         {kind === 'template' && <span className="rounded bg-[var(--panel-2)] px-1.5 py-0.5 text-[11px] font-medium t2">Template</span>}
-        <div className="flex items-center rounded-lg border bd p-0.5 text-[12px] font-medium" data-testid="mode-toggle">
+        <div className="flex shrink-0 items-center whitespace-nowrap rounded-lg border bd p-0.5 text-[12px] font-medium" data-testid="mode-toggle" title="Speaking order: which side speaks first">
           {(['aff', 'con'] as Mode[]).map((s) => (
             <button
               key={s}
@@ -234,11 +246,24 @@ function FlowView({ editor, kind }: { editor: FlowEditor; kind: 'flow' | 'templa
               style={mode === s ? { background: s === 'aff' ? 'var(--aff)' : 'var(--con)' } : undefined}
               onClick={() => switchMode(s)}
             >
-              {s === 'aff' ? 'Aff' : 'Con'} speaks first
+              {s === 'aff' ? 'Aff' : 'Con'} first
             </button>
           ))}
         </div>
-        <div className="ml-auto flex items-center gap-3">
+        {kind === 'flow' && (
+          <button
+            className={cls('btn btn-outline min-w-0 shrink whitespace-nowrap', roundOpen && 'bg-[var(--panel-2)]')}
+            onClick={() => {
+              ensureRoundFields(doc);
+              setRoundOpen((o) => !o);
+            }}
+            title="Round info: opponent, judge, tournament, result…"
+            data-testid="round-info-btn"
+          >
+            <Icon.info /> <RoundInfoSummary doc={doc} />
+          </button>
+        )}
+        <div className="ml-auto flex shrink-0 items-center gap-3 whitespace-nowrap">
           {kind === 'flow' && (
             <button
               className="btn btn-outline gap-2"
@@ -254,11 +279,11 @@ function FlowView({ editor, kind }: { editor: FlowEditor; kind: 'flow' | 'templa
               <Icon.copy />
             </button>
           )}
-          <StatusPill status={status} local={transport.kind === 'local'} />
+          <StatusPill status={status} local={transport.kind === 'local'} compact />
           <Presence me={{ name: meName, color: meColor }} others={othersShown} />
           {kind === 'flow' && (
             <button className="btn btn-outline" onClick={saveAsTemplate} title="Save current flow as template">
-              <Icon.template /> Save as template
+              <Icon.template /> <span className="hidden 2xl:inline">Save as template</span>
             </button>
           )}
           <button className="btn !p-1.5" onClick={openShortcuts} title="Keyboard shortcuts (Ctrl/⌘ + /)">
@@ -272,6 +297,13 @@ function FlowView({ editor, kind }: { editor: FlowEditor; kind: 'flow' | 'templa
       <TabBar editor={editor} sheets={sheets} active={active} />
       <div className="min-h-0 flex-1">{active && <Sheet key={active} editor={editor} sheet={active} presence={sync.presence} />}</div>
       {kind === 'flow' && <TimerBar doc={doc} mode={mode} />}
+      {kind === 'flow' && roundOpen && (
+        <div className="pointer-events-none absolute inset-x-0 bottom-11 top-12 z-30">
+          <div className="pointer-events-auto">
+            <RoundInfoPanel doc={doc} mode={mode} onModeChange={switchMode} onClose={() => setRoundOpen(false)} />
+          </div>
+        </div>
+      )}
     </div>
   );
 }

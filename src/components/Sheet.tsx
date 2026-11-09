@@ -258,8 +258,8 @@ function Cell({ id, n, level, ctx }: { id: string; n: Y.Map<any>; level: number;
           if (op.retain) pos += op.retain;
           else if (op.insert) {
             const len = (op.insert as string).length;
-            if (pos <= s) s += len;
-            if (pos <= e) e += len;
+            if (pos < s) s += len; // a tie means it landed after our own text: keep typing in our run
+            if (pos < e) e += len;
             pos += len;
           } else if (op.delete) {
             const d = op.delete;

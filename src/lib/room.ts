@@ -10,7 +10,8 @@ import * as Y from 'yjs';
 import { acquireDoc, destroyDocEverywhere, LOCAL, withDoc, type DocSync } from './sync';
 import { copyFlowContent, initFlowDoc, meta, sheetOrder, timersMap, type Mode } from './model';
 import { transport } from './transport';
-import { isValidRoomCode, newId, newRoomCode } from './util';
+import { fromBase64, isValidRoomCode, newId, newRoomCode } from './util';
+import { EMPTY_SUMMARY, readSummary, roundMap, type RoundSummary } from './round';
 
 export type DocKind = 'flow' | 'template';
 export interface Entry {
@@ -22,6 +23,7 @@ export interface Entry {
   updatedAt: number;
   code?: string; // flows: share code where the flow lives
   joined?: boolean; // flows: joined from a partner's code (you didn't create it)
+  round: RoundSummary; // flows: snapshot of Round info for cards, filters and search
 }
 export interface Loc {
   room: string;
@@ -119,6 +121,7 @@ export function readEntries(d: Y.Doc): Entry[] {
       updatedAt: m.get('updatedAt') ?? m.get('createdAt') ?? 0,
       code: m.get('code'),
       joined: m.get('joined'),
+      round: { ...EMPTY_SUMMARY, ...(m.get('round') || {}) },
     });
   });
   return out;
@@ -181,7 +184,7 @@ export async function createFlow(opts: { name: string; mode: Mode; from?: Loc | 
   await registerRoom(code);
   await fill(flowLoc(code), { ...opts, kind: 'flow' });
   const now = Date.now();
-  putEntry({ id: code, code, name: opts.name, mode: opts.mode, kind: 'flow', createdAt: now, updatedAt: now });
+  putEntry({ id: code, code, name: opts.name, mode: opts.mode, kind: 'flow', createdAt: now, updatedAt: now, round: EMPTY_SUMMARY });
   return code;
 }
 
@@ -189,7 +192,7 @@ export async function createTemplate(opts: { name: string; mode: Mode; from?: Lo
   const id = newId();
   await fill({ room: homeCode(), doc: id }, { ...opts, kind: 'template' });
   const now = Date.now();
-  putEntry({ id, name: opts.name, mode: opts.mode, kind: 'template', createdAt: now, updatedAt: now });
+  putEntry({ id, name: opts.name, mode: opts.mode, kind: 'template', createdAt: now, updatedAt: now, round: EMPTY_SUMMARY });
   return id;
 }
 
@@ -231,9 +234,10 @@ export async function joinFlow(raw: string): Promise<JoinResult> {
     mode: (meta(s.doc).get('mode') as Mode) || 'aff',
     createdAt: (meta(s.doc).get('createdAt') as number) || Date.now(),
     sheets: sheetOrder(s.doc).length,
+    round: readSummary(s.doc),
   }));
   if (!info.name && !info.sheets) return { ok: false, error: 'No flow with that code.' };
-  putEntry({ id: code, code, name: info.name || 'Shared flow', mode: info.mode, kind: 'flow', createdAt: info.createdAt, updatedAt: Date.now(), joined: true });
+  putEntry({ id: code, code, name: info.name || 'Shared flow', mode: info.mode, kind: 'flow', createdAt: info.createdAt, updatedAt: Date.now(), joined: true, round: info.round });
   return { ok: true, code };
 }
 
@@ -242,7 +246,7 @@ export function rememberFlow(code: string, flow: Y.Doc) {
   if (entriesMap(homeIndex().doc).has(code)) return;
   const m = meta(flow);
   if (!m.get('name')) return;
-  putEntry({ id: code, code, name: m.get('name'), mode: m.get('mode') || 'aff', kind: 'flow', createdAt: m.get('createdAt') || Date.now(), updatedAt: Date.now(), joined: true });
+  putEntry({ id: code, code, name: m.get('name'), mode: m.get('mode') || 'aff', kind: 'flow', createdAt: m.get('createdAt') || Date.now(), updatedAt: Date.now(), joined: true, round: readSummary(flow) });
 }
 
 // ---------- delete / rename ----------
@@ -279,11 +283,62 @@ export function bindEntry(id: string, flow: Y.Doc): () => void {
     if (name && e.get('name') !== name) updateEntry(id, { name });
     if (mode && e.get('mode') !== mode) updateEntry(id, { mode });
   };
+  const rm = roundMap(flow);
+  let roundTimer: any = null;
+  const onRound = () => {
+    if (roundTimer) return;
+    roundTimer = setTimeout(() => {
+      roundTimer = null;
+      mirrorRound(id, readSummary(flow));
+    }, 600);
+  };
   flow.on('update', onUpdate);
   m.observe(onMeta);
+  rm.observeDeep(onRound);
   onMeta();
+  onRound();
   return () => {
     flow.off('update', onUpdate);
     m.unobserve(onMeta);
+    rm.unobserveDeep(onRound);
+    if (roundTimer) {
+      clearTimeout(roundTimer);
+      mirrorRound(id, readSummary(flow));
+    }
   };
+}
+
+function mirrorRound(id: string, sum: RoundSummary) {
+  const e = entriesMap(homeIndex().doc).get(id);
+  if (!e) return;
+  const prev = { ...EMPTY_SUMMARY, ...(e.get('round') || {}) };
+  if (JSON.stringify(prev) !== JSON.stringify(sum)) updateEntry(id, { round: sum });
+}
+
+/**
+ * Refresh dashboard cards from the server copy of each flow, so Round info your partner edited
+ * shows up without you opening the flow. Fetches only; doesn't join live channels.
+ */
+const lastPeek = new Map<string, number>();
+export async function refreshFlowSummaries(entries: Entry[]) {
+  if (!navigator.onLine || transport.kind !== 'supabase') return;
+  const todo = entries.filter((e) => e.kind === 'flow' && e.code && Date.now() - (lastPeek.get(e.id) ?? 0) > 60_000);
+  const work = async (e: Entry) => {
+    lastPeek.set(e.id, Date.now());
+    try {
+      const rows = await transport.getUpdates(e.code!, FLOW_DOC, 0);
+      if (!rows.length) return;
+      const d = new Y.Doc();
+      for (const r of rows) Y.applyUpdate(d, fromBase64(r.update));
+      const name = meta(d).get('name');
+      const mode = meta(d).get('mode');
+      if (name && name !== e.name) updateEntry(e.id, { name });
+      if (mode && mode !== e.mode) updateEntry(e.id, { mode });
+      mirrorRound(e.id, readSummary(d));
+      d.destroy();
+    } catch {
+      /* offline or flaky: keep the cached card */
+    }
+  };
+  for (let i = 0; i < todo.length; i += 4) await Promise.all(todo.slice(i, i + 4).map(work));
 }

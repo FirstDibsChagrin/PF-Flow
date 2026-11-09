@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
 import {
   createFlow,
@@ -11,11 +11,13 @@ import {
   joinFlow,
   locOf,
   readEntries,
+  refreshFlowSummaries,
   renameEntry,
   type DocKind,
   type Entry,
 } from '../lib/room';
-import type { Mode } from '../lib/model';
+import type { Mode, Side } from '../lib/model';
+import { RESULT_LABEL, type Result } from '../lib/round';
 import { useStore } from '../lib/store';
 import { transport } from '../lib/transport';
 import { useY } from '../lib/yhooks';
@@ -113,12 +115,26 @@ export function DocList({ kind }: { kind: DocKind }) {
   const all = readEntries(sync.doc);
   const templates = all.filter((e) => e.kind === 'template').sort((a, b) => a.name.localeCompare(b.name));
   const flowCount = all.filter((e) => e.kind === 'flow').length;
+  const [filters, setFilters] = useState<Filters>({});
+  const anyFilter = Object.values(filters).some(Boolean);
+  // pull Round info your partner edited into the cards (fetch only, no live channels)
+  useEffect(() => {
+    if (kind === 'flow' && status.loaded) refreshFlowSummaries(all);
+  }, [kind, status.loaded, all.length]);
   const list = useMemo(() => {
     const ql = q.trim().toLowerCase();
-    const xs = all.filter((e) => e.kind === kind && (!ql || e.name.toLowerCase().includes(ql)));
+    const xs = all.filter((e) => {
+      if (e.kind !== kind) return false;
+      if (kind === 'flow' && !matchFilters(e, filters)) return false;
+      if (!ql) return true;
+      const r = e.round;
+      return [e.name, r.opponent, r.judge, r.tournament, r.round, r.side && `${r.side} my side`, r.result && RESULT_LABEL[r.result as Result]]
+        .filter(Boolean)
+        .some((v) => String(v).toLowerCase().includes(ql));
+    });
     xs.sort((a, b) => (sort === 'name' ? a.name.localeCompare(b.name, undefined, { numeric: true }) : sort === 'created' ? b.createdAt - a.createdAt : b.updatedAt - a.updatedAt));
     return xs;
-  }, [JSON.stringify(all), q, sort, kind]);
+  }, [JSON.stringify(all), q, sort, kind, JSON.stringify(filters)]);
 
   const label = kind === 'flow' ? 'flow' : 'template';
 
@@ -186,7 +202,13 @@ export function DocList({ kind }: { kind: DocKind }) {
             <span className="t3 absolute left-3 top-1/2 -translate-y-1/2">
               <Icon.search />
             </span>
-            <input className="input !pl-9" placeholder={`Search ${label}s`} value={q} onChange={(e) => setQ(e.target.value)} />
+            <input
+              className="input !pl-9"
+              placeholder={kind === 'flow' ? 'Search flows, opponents, judges, tournaments…' : `Search ${label}s`}
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              data-testid="search"
+            />
           </div>
           <select className="input !w-auto" value={sort} onChange={(e) => setSort(e.target.value as Sort)}>
             <option value="updated">Last edited</option>
@@ -194,6 +216,7 @@ export function DocList({ kind }: { kind: DocKind }) {
             <option value="name">Name</option>
           </select>
         </div>
+        {kind === 'flow' && <FilterBar entries={all.filter((e) => e.kind === 'flow')} filters={filters} setFilters={setFilters} />}
 
         {!status.loaded ? (
           <div className="space-y-2">
@@ -204,15 +227,20 @@ export function DocList({ kind }: { kind: DocKind }) {
         ) : list.length === 0 ? (
           <div className="panel flex flex-col items-center rounded-xl px-6 py-16 text-center">
             <div className="mb-3 rounded-xl bg-[var(--panel-2)] p-3 t2">{kind === 'flow' ? <Icon.flow /> : <Icon.template />}</div>
-            <div className="text-[15px] font-semibold">{q ? 'No matches' : kind === 'flow' ? 'No flows yet' : 'No templates yet'}</div>
+            <div className="text-[15px] font-semibold">{q || anyFilter ? 'No matches' : kind === 'flow' ? 'No flows yet' : 'No templates yet'}</div>
             <div className="t2 mt-1 max-w-sm text-[13px]">
-              {q
-                ? 'Try a different search.'
+              {q || anyFilter
+                ? 'Try a different search or clear the filters.'
                 : kind === 'flow'
                   ? 'Create a flow, or join your partner’s with the code from their flow.'
                   : 'Build a template with your case already in the constructive column, or open a flow and click “Save as template”.'}
             </div>
-            {!q && (
+            {anyFilter && (
+              <button className="btn btn-outline mt-5" onClick={() => setFilters({})}>
+                Clear filters
+              </button>
+            )}
+            {!q && !anyFilter && (
               <button className="btn btn-primary mt-5" onClick={() => (kind === 'flow' ? setCreating(true) : newTemplate())}>
                 <Icon.plus /> New {label}
               </button>
@@ -238,7 +266,10 @@ export function DocList({ kind }: { kind: DocKind }) {
                     Edited {timeAgo(e.updatedAt)} · created {new Date(e.createdAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
                     {e.code && <span className="ml-2 font-mono tracking-wider">{e.code}</span>}
                   </div>
+                  {kind === 'flow' && <RoundLine e={e} />}
                 </div>
+                {kind === 'flow' && e.round.side && <SideBadge side={e.round.side} />}
+                {kind === 'flow' && e.round.result && <ResultBadge result={e.round.result} />}
                 {e.joined && <span className="t2 rounded-md bg-[var(--panel-2)] px-2 py-0.5 text-[11.5px] font-medium">Shared with you</span>}
                 <ModeBadge mode={e.mode} />
                 {kind === 'template' && (
@@ -373,5 +404,169 @@ function NewFlowDialog({ templates, count, onClose }: { templates: Entry[]; coun
         </div>
       </form>
     </Modal>
+  );
+}
+
+// ---------- Round info on cards ----------
+function RoundLine({ e }: { e: Entry }) {
+  const r = e.round;
+  const bits: [string, string][] = [];
+  if (r.opponent) bits.push(['vs', r.opponent]);
+  if (r.tournament) bits.push(['', r.tournament + (r.round ? ` · ${r.round}` : '')]);
+  else if (r.round) bits.push(['', r.round]);
+  if (r.judge) bits.push(['Judge', r.judge]);
+  if (!bits.length) return null;
+  return (
+    <div className="t2 mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-[12.5px]" data-testid="round-line">
+      {bits.map(([k, v], i) => (
+        <span key={i} className="truncate">
+          {k && <span className="t3 mr-1">{k}</span>}
+          {v}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+export function SideBadge({ side }: { side: Side }) {
+  return (
+    <span
+      className="whitespace-nowrap rounded-md border px-2 py-0.5 text-[11.5px] font-semibold"
+      style={{ borderColor: side === 'aff' ? 'var(--aff)' : 'var(--con)', color: side === 'aff' ? 'var(--aff)' : 'var(--con)' }}
+      title="My side"
+    >
+      {side === 'aff' ? 'We were Aff' : 'We were Con'}
+    </span>
+  );
+}
+
+const RESULT_STYLE: Record<Result, [string, string]> = {
+  win: ['rgba(5,150,105,.14)', '#059669'],
+  loss: ['rgba(220,38,38,.12)', '#dc2626'],
+  pending: ['var(--panel-2)', 'var(--text-2)'],
+};
+export function ResultBadge({ result }: { result: Result }) {
+  const [bg, fg] = RESULT_STYLE[result];
+  return (
+    <span className="whitespace-nowrap rounded-md px-2 py-0.5 text-[11.5px] font-semibold" style={{ background: bg, color: fg }}>
+      {RESULT_LABEL[result]}
+    </span>
+  );
+}
+
+// ---------- filters ----------
+interface Filters {
+  side?: Side;
+  result?: Result;
+  mode?: Mode;
+  tournament?: string;
+  judge?: string;
+  opponent?: string;
+}
+const norm = (s: string) => s.trim().toLowerCase();
+
+function matchFilters(e: Entry, f: Filters): boolean {
+  const r = e.round;
+  if (f.side && r.side !== f.side) return false;
+  // a flow with no result recorded yet counts as Pending
+  if (f.result && (r.result || 'pending') !== f.result) return false;
+  if (f.mode && e.mode !== f.mode) return false;
+  if (f.tournament && norm(r.tournament) !== norm(f.tournament)) return false;
+  if (f.judge && norm(r.judge) !== norm(f.judge)) return false;
+  if (f.opponent && norm(r.opponent) !== norm(f.opponent)) return false;
+  return true;
+}
+
+/** Distinct non-empty values (case-insensitive), most common first. */
+function valuesOf(entries: Entry[], key: 'tournament' | 'judge' | 'opponent'): string[] {
+  const counts = new Map<string, { label: string; n: number }>();
+  for (const e of entries) {
+    const v = e.round[key].trim();
+    if (!v) continue;
+    const k = norm(v);
+    const c = counts.get(k);
+    if (c) c.n++;
+    else counts.set(k, { label: v, n: 1 });
+  }
+  return [...counts.values()].sort((a, b) => b.n - a.n || a.label.localeCompare(b.label)).map((c) => c.label);
+}
+
+function FilterBar({ entries, filters, setFilters }: { entries: Entry[]; filters: Filters; setFilters: (f: Filters) => void }) {
+  const [open, setOpen] = useState<{ key: keyof Filters; x: number; y: number } | null>(null);
+  const set = (k: keyof Filters, v: string | undefined) => {
+    setFilters({ ...filters, [k]: v || undefined });
+    setOpen(null);
+  };
+  const options: Record<keyof Filters, { value: string; label: string }[]> = {
+    side: [
+      { value: 'aff', label: 'Aff' },
+      { value: 'con', label: 'Con' },
+    ],
+    result: [
+      { value: 'win', label: 'Win' },
+      { value: 'loss', label: 'Loss' },
+      { value: 'pending', label: 'Pending' },
+    ],
+    mode: [
+      { value: 'aff', label: 'Aff speaks first' },
+      { value: 'con', label: 'Con speaks first' },
+    ],
+    tournament: valuesOf(entries, 'tournament').map((v) => ({ value: v, label: v })),
+    judge: valuesOf(entries, 'judge').map((v) => ({ value: v, label: v })),
+    opponent: valuesOf(entries, 'opponent').map((v) => ({ value: v, label: v })),
+  };
+  const chips: [keyof Filters, string][] = [
+    ['side', 'My side'],
+    ['result', 'Result'],
+    ['mode', 'Speaking order'],
+    ['tournament', 'Tournament'],
+    ['judge', 'Judge'],
+    ['opponent', 'Opponent'],
+  ];
+  const active = Object.values(filters).some(Boolean);
+  return (
+    <div className="mb-4 flex flex-wrap items-center gap-2" data-testid="filters">
+      {chips.map(([k, label]) => {
+        const v = filters[k];
+        const shown = v ? options[k].find((o) => norm(o.value) === norm(v))?.label ?? v : null;
+        return (
+          <button
+            key={k}
+            className={cls('flex items-center gap-1.5 rounded-full border px-3 py-1 text-[12.5px] transition-colors', v ? 'font-semibold' : 't2 bd hover:bg-[var(--hover-bg)]')}
+            style={v ? { borderColor: 'var(--accent)', background: 'color-mix(in srgb, var(--accent) 12%, transparent)', color: 'var(--accent)' } : undefined}
+            onClick={(ev) => {
+              const r = (ev.currentTarget as HTMLElement).getBoundingClientRect();
+              setOpen({ key: k, x: r.left, y: r.bottom + 6 });
+            }}
+            data-testid={`chip-${k}`}
+          >
+            {label}
+            {shown ? `: ${shown}` : ''}
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M6 9l6 6 6-6" /></svg>
+          </button>
+        );
+      })}
+      {active && (
+        <button className="btn t2 !py-1 text-[12.5px]" onClick={() => setFilters({})} data-testid="clear-filters">
+          Clear filters
+        </button>
+      )}
+      {open && (
+        <Menu x={open.x} y={open.y} onClose={() => setOpen(null)}>
+          <MenuItem onClick={() => set(open.key, undefined)} active={!filters[open.key]}>
+            Any
+          </MenuItem>
+          <MenuSep />
+          {options[open.key].length === 0 && <div className="t3 px-2.5 py-1.5 text-[12.5px]">No values yet. Add them in Round info.</div>}
+          <div className="max-h-[50vh] overflow-auto">
+            {options[open.key].map((o) => (
+              <MenuItem key={o.value} onClick={() => set(open.key, o.value)} active={!!filters[open.key] && norm(filters[open.key]!) === norm(o.value)}>
+                {o.label}
+              </MenuItem>
+            ))}
+          </div>
+        </Menu>
+      )}
+    </div>
   );
 }

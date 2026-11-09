@@ -48,6 +48,9 @@ export const Icon = {
   flow: () => (
     <svg width="16" height="16" viewBox="0 0 24 24" {...P}><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M9 4v16M15 4v16" /></svg>
   ),
+  info: () => (
+    <svg width="15" height="15" viewBox="0 0 24 24" {...P}><circle cx="12" cy="12" r="9" /><path d="M12 11v5M12 8h.01" /></svg>
+  ),
   close: () => (
     <svg width="16" height="16" viewBox="0 0 24 24" {...P}><path d="M6 6l12 12M18 6L6 18" /></svg>
   ),
@@ -170,7 +173,7 @@ export function ToastHost() {
 }
 
 // ---------- status ----------
-export function StatusPill({ status, local }: { status: DocStatus; local?: boolean }) {
+export function StatusPill({ status, local, compact }: { status: DocStatus; local?: boolean; compact?: boolean }) {
   let color = '#10b981';
   let text = 'Connected · Saved';
   if (local) {
@@ -194,7 +197,7 @@ export function StatusPill({ status, local }: { status: DocStatus; local?: boole
         )}
         <span className="relative inline-flex h-2 w-2 rounded-full" style={{ background: color }} />
       </span>
-      {text}
+      <span className={compact ? 'hidden 2xl:inline' : undefined}>{text}</span>
     </div>
   );
 }

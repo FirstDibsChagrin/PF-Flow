@@ -289,3 +289,17 @@ body {
 .group\/slot:hover .respond-slot {
   background: var(--hover-bg);
 }
+
+@keyframes slidein {
+  from {
+    transform: translateX(16px);
+    opacity: 0;
+  }
+  to {
+    transform: none;
+    opacity: 1;
+  }
+}
+.slide-in {
+  animation: slidein 160ms ease-out;
+}
