@@ -341,3 +341,43 @@ body {
   animation: cellflash 1.6s ease-in-out;
   background: var(--focus-bg);
 }
+
+/* tracker chips */
+.trk-chip {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 6px;
+  padding: 1px 7px;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 16px;
+  border: 1px solid transparent;
+  white-space: nowrap;
+}
+.trk-extended {
+  background: var(--ext-bg);
+  color: var(--ext);
+  border-color: color-mix(in srgb, var(--ext) 35%, transparent);
+}
+.trk-present {
+  color: var(--text-2);
+  border-color: var(--border-strong);
+}
+.trk-missing {
+  color: var(--text-3);
+  border: 1px dashed var(--border-strong);
+}
+.trk-na {
+  color: var(--text-3);
+  opacity: 0.45;
+  text-decoration: line-through;
+}
+.trk-gap {
+  color: var(--drop);
+  background: var(--drop-bg);
+  border: 1px solid color-mix(in srgb, var(--drop) 55%, transparent);
+}
+button.trk-chip:not(:disabled):hover {
+  filter: brightness(0.95);
+  cursor: pointer;
+}

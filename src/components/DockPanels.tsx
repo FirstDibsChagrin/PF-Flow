@@ -3,11 +3,13 @@ import { DockFrame } from './Dock';
 import { HistoryPanel } from './History';
 import { ChatPanel } from './Chat';
 import { ExtensionsPanel } from './Extensions';
+import { TrackerPanel } from './Tracker';
 
 export function DockPanels({ editor, kind, panel }: { editor: FlowEditor; kind: 'flow' | 'template'; panel: DockPanel }) {
   const close = () => editor.dock.set(null);
   if (panel === 'history') return <HistoryPanel editor={editor} onClose={close} />;
   if (panel === 'chat') return <ChatPanel editor={editor} onClose={close} />;
+  if (panel === 'tracker') return <TrackerPanel editor={editor} onClose={close} />;
   if (panel === 'ext') return <ExtensionsPanel editor={editor} kind={kind} onClose={close} />;
   return (
     <DockFrame title={panel} onClose={close}>
