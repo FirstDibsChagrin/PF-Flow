@@ -80,6 +80,7 @@ export class FlowEditor {
   // ---------- focus ----------
   setFocus(node: string | null, caret: 'end' | 'start' | 'keep' = 'end') {
     this.caretHint = caret;
+    if (node !== this.focus.get().node) this.undo.stopCapturing();
     if (!node) return this.blur();
     const sheet = getNode(this.doc, node)?.get('sheet') ?? null;
     if (sheet && sheet !== this.activeSheet.get()) this.activeSheet.set(sheet);
@@ -182,6 +183,7 @@ export class FlowEditor {
   // ---------- creation ----------
   /** Insert a sibling next to id (offset 0 = above, 1 = below). */
   addSibling(id: string, offset: 0 | 1): string | null {
+    this.undo.stopCapturing();
     const parent = this.parentOf(id);
     const arr = childrenOf(this.doc, parent);
     if (!arr) return null;
@@ -266,6 +268,7 @@ export class FlowEditor {
 
   /** Delete a cell and move focus to a sensible neighbour. */
   remove(id: string) {
+    this.undo.stopCapturing();
     const sibs = this.siblings(id);
     const i = sibs.indexOf(id);
     const parent = this.parentOf(id);

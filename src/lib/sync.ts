@@ -112,16 +112,27 @@ export class DocSync {
     }, this.backoff);
   }
 
+  // Membership comes from Realtime Presence (rate-limited, so only name/color are tracked);
+  // cursor positions travel over broadcast, which tolerates frequent updates.
+  private members = new Map<string, { name: string; color: string }>();
+  private cursors = new Map<string, { sheet: string | null; node: string | null }>();
+  private publishPresence() {
+    const list: PresenceState[] = [];
+    for (const [id, m] of this.members) list.push({ id, ...m, ...(this.cursors.get(id) ?? { sheet: null, node: null }) });
+    this.presence.set(list);
+  }
+
   private connect() {
     this.ch = transport.channel(`r:${this.room}:${this.docId}`, CLIENT_KEY, {
       onMessage: this.onMessage,
       onPresence: (states) => {
-        const list: PresenceState[] = [];
+        this.members.clear();
         for (const [k, arr] of Object.entries(states)) {
           const s = (arr as any[])[0];
-          if (s && k !== CLIENT_KEY) list.push({ ...s, id: k });
+          if (s && k !== CLIENT_KEY) this.members.set(k, { name: s.name, color: s.color });
         }
-        this.presence.set(list);
+        for (const k of [...this.cursors.keys()]) if (!this.members.has(k)) this.cursors.delete(k);
+        this.publishPresence();
       },
       onStatus: (s) => {
         this.joined = s === 'connected';
@@ -129,10 +140,9 @@ export class DocSync {
           this.backoff = 1000;
           this.setStatus({ net: 'online' });
           this.fullSync();
-          if (this.myPresence) {
-            this.lastSentPresence = '';
-            this.track(this.myPresence);
-          }
+          this.lastMember = '';
+          this.sendMember();
+          this.sendCursor();
         } else if (s === 'disconnected') {
           console.debug('[pf] channel disconnected', this.docId);
           this.setStatus({ net: navigator.onLine ? 'connecting' : 'offline' });
@@ -142,22 +152,35 @@ export class DocSync {
     });
   }
 
-  private trackTimer: any = null;
-  private lastSentPresence = '';
-  private lastTrackAt = 0;
+  private lastMember = '';
+  private memberTimer: any = null;
+  private sendMember() {
+    if (!this.myPresence || this.memberTimer) return;
+    this.memberTimer = setTimeout(() => {
+      this.memberTimer = null;
+      if (!this.myPresence) return;
+      const m = { name: this.myPresence.name, color: this.myPresence.color };
+      const key = JSON.stringify(m);
+      if (key === this.lastMember) return;
+      this.lastMember = key;
+      this.ch?.track(m);
+    }, 500);
+  }
+
+  private cursorTimer: any = null;
+  private sendCursor() {
+    if (this.cursorTimer) return;
+    this.cursorTimer = setTimeout(() => {
+      this.cursorTimer = null;
+      const p = this.myPresence;
+      if (p) this.ch?.send({ t: 'cur', from: CLIENT_KEY, sheet: p.sheet ?? null, node: p.node ?? null });
+    }, 60);
+  }
+
   track(state: Omit<PresenceState, 'id'>) {
     this.myPresence = { ...state, id: CLIENT_KEY };
-    if (this.trackTimer) return;
-    // presence is rate-limited server-side: throttle and drop duplicates
-    const wait = Math.max(60, 350 - (Date.now() - this.lastTrackAt));
-    this.trackTimer = setTimeout(() => {
-      this.trackTimer = null;
-      const key = JSON.stringify(this.myPresence);
-      if (!this.myPresence || key === this.lastSentPresence) return;
-      this.lastSentPresence = key;
-      this.lastTrackAt = Date.now();
-      this.ch?.track(this.myPresence);
-    }, wait);
+    this.sendMember();
+    this.sendCursor();
   }
 
   private get stashKey() {
@@ -211,12 +234,16 @@ export class DocSync {
 
   private onMessage = (msg: any) => {
     if (!msg || msg.from === CLIENT_KEY) return;
-    if (msg.t === 'u') {
+    if (msg.t === 'cur') {
+      this.cursors.set(msg.from, { sheet: msg.sheet, node: msg.node });
+      this.publishPresence();
+    } else if (msg.t === 'u') {
       Y.applyUpdate(this.doc, fromBase64(msg.d), REMOTE);
     } else if (msg.t === 'sv') {
       // a peer joined: send them whatever they are missing
       const diff = Y.encodeStateAsUpdate(this.doc, fromBase64(msg.d));
       if (diff.length > 2 && diff.length < 200_000) this.ch?.send({ t: 'u', d: toBase64(diff), from: CLIENT_KEY });
+      this.sendCursor(); // let the newcomer see where we are
     }
   };
 

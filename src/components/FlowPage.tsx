@@ -288,10 +288,8 @@ function TabBar({ editor, sheets, active }: { editor: FlowEditor; sheets: string
       id = addSheet(doc, n, 'extra');
     });
     editor.activeSheet.set(id);
-    setTimeout(() => {
-      const first = liveChildren(doc, rootOf(id))[0];
-      if (first) editor.setFocus(first);
-    }, 30);
+    const first = liveChildren(doc, rootOf(id))[0];
+    if (first) editor.setFocus(first);
   };
   const toggleCol = (id: string, key: string) => {
     const s = smap.get(id);
