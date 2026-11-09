@@ -21,7 +21,8 @@ If `VITE_SUPABASE_*` env vars are missing, the app falls back to a **local mode*
 ## Run locally
 
 ```bash
-cd pf-flow
+git clone https://github.com/FirstDibsChagrin/PF-Flow.git
+cd PF-Flow
 npm install
 cp .env.example .env.local   # then fill in your Supabase URL + publishable key
 npm run dev                  # http://localhost:5173
@@ -42,8 +43,7 @@ npm run preview              # http://localhost:4173
 1. **Supabase.** A free-tier project named `pf-flow` (ref `mlfarkjibpcnxcfozbly`) has already been created in your FirstDibs org, and `supabase/schema.sql` has been applied to it.
    * To use a different project, open its SQL Editor and run `supabase/schema.sql`. Then copy *Project URL* and the *publishable* (or legacy anon) key from **Settings → API**.
    * Free projects pause after about a week of inactivity. Un-pause from the Supabase dashboard if the app shows "Connecting…" forever.
-2. **Vercel.** Import the GitHub repo and set:
-   * **Root Directory:** `pf-flow`
+2. **Vercel.** Import the `FirstDibsChagrin/PF-Flow` GitHub repo (leave Root Directory blank) and set:
    * Framework preset: Vite (build `npm run build`, output `dist`). `vercel.json` already handles SPA routing.
    * Environment variables (Production + Preview):
      * `VITE_SUPABASE_URL=https://mlfarkjibpcnxcfozbly.supabase.co`
