@@ -62,3 +62,11 @@ document.documentElement.style.setProperty('--cell-font', `${settings.get().font
 export function colWidth(key: string) {
   return settings.get().colWidths[key] ?? DEFAULT_COL_WIDTH;
 }
+
+/** Show a partner who picked my cursor color in a different, distinct color (stable per partner). */
+export function partnerColor(theirs: string, mine: string, salt: string | number = 0): string {
+  if (theirs !== mine) return theirs;
+  const pool = USER_COLORS.filter((c) => c !== mine);
+  const n = typeof salt === 'number' ? salt : [...salt].reduce((a, ch) => a + ch.charCodeAt(0), 0);
+  return pool[n % pool.length];
+}

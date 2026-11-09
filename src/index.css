@@ -303,3 +303,41 @@ body {
 .slide-in {
   animation: slidein 160ms ease-out;
 }
+
+.chat-marker {
+  position: absolute;
+  top: -6px;
+  right: -4px;
+  z-index: 6;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 9px;
+  color: white;
+  background: var(--accent);
+  box-shadow: 0 0 0 2px var(--panel);
+  cursor: pointer;
+}
+.dark .chat-marker {
+  color: #0f1115;
+}
+.chat-marker svg {
+  width: 10px;
+  height: 10px;
+}
+@keyframes cellflash {
+  0%,
+  100% {
+    box-shadow: inset 0 0 0 0 transparent;
+  }
+  20%,
+  60% {
+    box-shadow: inset 0 0 0 2px var(--accent), 0 0 0 4px color-mix(in srgb, var(--accent) 25%, transparent);
+  }
+}
+.cell.flashing {
+  animation: cellflash 1.6s ease-in-out;
+  background: var(--focus-bg);
+}

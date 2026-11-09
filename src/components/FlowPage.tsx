@@ -23,8 +23,9 @@ import { DOCK_ITEMS, DockStrip } from './Dock';
 import { DockPanels } from './DockPanels';
 import { PreviewView, previewStore } from './History';
 import { ActivityRecorder, AUTO_SNAPSHOT_MS, flushPendingSnapshots, lastSnapshotAt, saveSnapshot, type RestoreNotice } from '../lib/history';
-import { settings } from '../lib/settings';
+import { partnerColor, settings } from '../lib/settings';
 import { clientKey } from '../lib/sync';
+import { chatArray, chatCellIndex, hasUnread } from '../lib/chat';
 import { ensureRoundFields } from '../lib/round';
 import { useSettings } from '../lib/settings';
 import { useStore } from '../lib/store';
@@ -120,7 +121,7 @@ function FlowView({ editor, kind }: { editor: FlowEditor; kind: 'flow' | 'templa
 
   // remote presence might pick same color: display partner with a contrasting color
   const othersShown = useMemo(
-    () => others.map((o, i) => (o.color === meColor ? { ...o, color: ['#f59e0b', '#10b981', '#ec4899'][i % 3] } : o)),
+    () => others.map((o) => ({ ...o, color: partnerColor(o.color, meColor, o.id) })),
     [others, meColor],
   );
 
@@ -153,6 +154,19 @@ function FlowView({ editor, kind }: { editor: FlowEditor; kind: 'flow' | 'templa
       rec.destroy();
       previewStore.get()?.doc.destroy();
       previewStore.set(null);
+    };
+  }, [doc, kind]);
+
+  // chat: keep the cell -> messages index for cell markers
+  useEffect(() => {
+    if (kind !== 'flow') return;
+    const idx = chatCellIndex(doc);
+    const sync = () => editor.chatCells.set(idx.store.get());
+    sync();
+    const un = idx.store.subscribe(sync);
+    return () => {
+      un();
+      idx.destroy();
     };
   }, [doc, kind]);
 
@@ -377,10 +391,12 @@ function FlowView({ editor, kind }: { editor: FlowEditor; kind: 'flow' | 'templa
   );
 }
 
-/** Unread/attention dots on dock icons. */
+/** Unread/attention dots on dock icons (chat: partner wrote while the panel was closed). */
 function useDockDots(editor: FlowEditor) {
-  void editor;
-  return {} as Partial<Record<import('../lib/editor').DockPanel, boolean>>;
+  const arr = chatArray(editor.doc);
+  useY(arr);
+  const open = useStore(editor.dock);
+  return { chat: open !== 'chat' && hasUnread(editor.doc, editor.room) } as Partial<Record<import('../lib/editor').DockPanel, boolean>>;
 }
 
 function TabBar({ editor, sheets, active }: { editor: FlowEditor; sheets: string[]; active: string | null }) {

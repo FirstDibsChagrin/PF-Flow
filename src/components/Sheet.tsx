@@ -2,7 +2,7 @@ import { memo, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import * as Y from 'yjs';
 import type { FlowEditor } from '../lib/editor';
 import { getNode, liveChildren, meta, rootOf, sheetsMap, setText, type Column, type Mark } from '../lib/model';
-import { DEFAULT_COL_WIDTH, patchSettings, settings, useSettings } from '../lib/settings';
+import { DEFAULT_COL_WIDTH, partnerColor, patchSettings, settings, useSettings } from '../lib/settings';
 import { Store, useStore } from '../lib/store';
 import type { PresenceState } from '../lib/sync';
 import { useY } from '../lib/yhooks';
@@ -208,12 +208,11 @@ function RespondSlots({ id, level, ctx }: { id: string; level: number; ctx: Ctx 
   return <div className="flex self-stretch" data-respond={id}>{cols}</div>;
 }
 
-const ALT_COLORS = ['#f59e0b', '#10b981', '#ec4899'];
 function useRemoteOn(store: Store<PresenceState[]>, id: string) {
   const mine = useSettings((s) => s.color);
   const key = useStore(store, (list) =>
     list
-      .map((p, i) => ({ ...p, color: p.color === mine ? ALT_COLORS[i % 3] : p.color }))
+      .map((p) => ({ ...p, color: partnerColor(p.color, mine, p.id) }))
       .filter((p) => p.node === id)
       .map((p) => `${p.name}\u0001${p.color}`)
       .join('\u0002'),
@@ -232,6 +231,8 @@ function Cell({ id, n, level, ctx }: { id: string; n: Y.Map<any>; level: number;
   const width = ctx.widths[level];
   const mark: Mark | undefined = n.get('mark');
   const isExt = !!n.get('ext');
+  const chatIds = useStore(editor.chatCells, (c) => (c[id] ? c[id].join(',') : ''));
+  const flashing = useStore(editor.flash, (f) => f === id);
 
   const autosize = () => {
     const ta = ref.current;
@@ -359,7 +360,7 @@ function Cell({ id, n, level, ctx }: { id: string; n: Y.Map<any>; level: number;
 
   return (
     <div
-      className={cls('cell mx-1 my-[3px] px-2 py-[5px]', focused && 'focused', mark && `m-${mark}`, n.get('bold') && 'bold', n.get('crossed') && 'crossed')}
+      className={cls('cell mx-1 my-[3px] px-2 py-[5px]', focused && 'focused', flashing && 'flashing', mark && `m-${mark}`, n.get('bold') && 'bold', n.get('crossed') && 'crossed')}
       onContextMenu={(e) => {
         e.preventDefault();
         if (ro) return;
@@ -415,6 +416,22 @@ function Cell({ id, n, level, ctx }: { id: string; n: Y.Map<any>; level: number;
           editor.addSibling(id, 1);
         }}
       />}
+      {chatIds && (
+        <button
+          className="chat-marker"
+          title="Open the message about this cell"
+          onMouseDown={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            const ids = chatIds.split(',');
+            editor.chatTarget.set(ids[ids.length - 1]);
+            editor.dock.set('chat');
+          }}
+          data-testid="chat-marker"
+        >
+          <Icon.pin />
+        </button>
+      )}
       {mark && (
         <span className="mark-chip" style={{ color: chipColor }}>
           {MARK_LABEL[mark]}

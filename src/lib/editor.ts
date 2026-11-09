@@ -39,6 +39,12 @@ export class FlowEditor {
   flash = new Store<string | null>(null);
   /** read-only editors (version preview) */
   readOnly = false;
+  /** the last cell I had selected (for "Attach to cell" in chat) */
+  lastCell = new Store<string | null>(null);
+  /** chat: cell id -> attached message ids (set up by the flow page) */
+  chatCells = new Store<Record<string, string[]>>({});
+  /** chat: message to scroll to / highlight when the chat panel opens */
+  chatTarget = new Store<string | null>(null);
   undo: Y.UndoManager;
   focus = new Store<Focus>({ sheet: null, node: null });
   activeSheet = new Store<string | null>(null);
@@ -118,6 +124,7 @@ export class FlowEditor {
     const sheet = getNode(this.doc, node)?.get('sheet') ?? null;
     if (sheet && sheet !== this.activeSheet.get()) this.activeSheet.set(sheet);
     this.focus.set({ sheet, node });
+    this.lastCell.set(node);
   }
   blur() {
     this.cleanupProvisional(null);
