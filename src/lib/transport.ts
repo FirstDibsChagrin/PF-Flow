@@ -17,6 +17,21 @@ export interface UpdateRow {
   id: number;
   update: string;
 }
+export interface SnapshotMeta {
+  id: number;
+  name: string | null;
+  kind: 'auto' | 'manual';
+  created_at: string;
+  created_by: string | null;
+  summary: string | null;
+}
+export interface SnapshotInput {
+  name: string | null;
+  kind: 'auto' | 'manual';
+  by: string;
+  summary: string;
+  data: string;
+}
 export interface Transport {
   kind: 'supabase' | 'local';
   createRoom(code: string): Promise<boolean>;
@@ -26,6 +41,9 @@ export interface Transport {
   compact(room: string, doc: string, merged: string, ids: number[]): Promise<void>;
   deleteDoc(room: string, doc: string): Promise<void>;
   serverTime(): Promise<number>;
+  saveSnapshot(room: string, s: SnapshotInput): Promise<number | null>;
+  listSnapshots(room: string): Promise<SnapshotMeta[]>;
+  getSnapshot(room: string, id: number): Promise<string | null>;
   /** Fire-and-forget push that survives page unload. */
   pushKeepalive(room: string, doc: string, update: string): void;
   channel(name: string, presenceKey: string, h: ChannelHandlers): Channel;
@@ -89,6 +107,10 @@ class SupabaseTransport implements Transport {
     await this.rpc('pf_delete_doc', { p_code: room, p_doc: doc });
   };
   serverTime = () => this.rpc<number>('pf_server_time', {});
+  saveSnapshot = (room: string, x: SnapshotInput) =>
+    this.rpc<number | null>('pf_save_snapshot', { p_code: room, p_name: x.name, p_kind: x.kind, p_by: x.by, p_summary: x.summary, p_data: x.data });
+  listSnapshots = (room: string) => this.rpc<SnapshotMeta[]>('pf_list_snapshots', { p_code: room });
+  getSnapshot = (room: string, id: number) => this.rpc<string | null>('pf_get_snapshot', { p_code: room, p_id: id });
   pushKeepalive(room: string, doc: string, update: string) {
     if (update.length > 60_000) return;
     try {
@@ -220,6 +242,27 @@ class LocalTransport implements Transport {
   }
   pushKeepalive(room: string, doc: string, update: string) {
     this.pushUpdate(room, doc, update);
+  }
+  private snaps(room: string): (SnapshotMeta & { data: string })[] {
+    try {
+      return JSON.parse(localStorage.getItem('pf.local.snaps.' + room) || '[]');
+    } catch {
+      return [];
+    }
+  }
+  async saveSnapshot(room: string, x: SnapshotInput) {
+    const list = this.snaps(room);
+    if (x.kind === 'auto' && list.some((s) => s.kind === 'auto' && Date.now() - Date.parse(s.created_at) < 240_000)) return null;
+    const id = this.nextId();
+    list.unshift({ id, name: x.name, kind: x.kind, created_at: new Date().toISOString(), created_by: x.by, summary: x.summary, data: x.data });
+    localStorage.setItem('pf.local.snaps.' + room, JSON.stringify(list.slice(0, 60)));
+    return id;
+  }
+  async listSnapshots(room: string) {
+    return this.snaps(room).map(({ data: _d, ...m }) => m);
+  }
+  async getSnapshot(room: string, id: number) {
+    return this.snaps(room).find((s) => s.id === id)?.data ?? null;
   }
   channel(name: string, presenceKey: string, h: ChannelHandlers): Channel {
     const bc = new BroadcastChannel('pf:' + name);

@@ -57,7 +57,7 @@ export function Sheet({ editor, sheet, presence }: { editor: FlowEditor; sheet: 
         {/* headers */}
         <div className="sticky top-0 z-20 flex border-b bd" style={{ background: 'var(--panel)' }}>
           {columns.map((c, i) =>
-            widths[i] ? <ColumnHeader key={c.key} col={c} width={widths[i]} onAdd={() => editor.addInColumn(sheet, i)} /> : null,
+            widths[i] ? <ColumnHeader key={c.key} col={c} width={widths[i]} onAdd={editor.readOnly ? undefined : () => editor.addInColumn(sheet, i)} /> : null,
           )}
         </div>
         {/* rows */}
@@ -68,7 +68,7 @@ export function Sheet({ editor, sheet, presence }: { editor: FlowEditor; sheet: 
             </div>
           ))}
         </div>
-        <div className={cls('flex min-h-[40vh] items-stretch', rootIds.length > 0 && 'border-t bd')} data-testid="new-row">
+        {editor.readOnly ? <div className="min-h-[40vh]" /> : <div className={cls('flex min-h-[40vh] items-stretch', rootIds.length > 0 && 'border-t bd')} data-testid="new-row">
           {columns.map((c, i) =>
             widths[i] ? (
               <div key={c.key} className="flex shrink-0 flex-col" style={{ width: widths[i] }}>
@@ -91,14 +91,14 @@ export function Sheet({ editor, sheet, presence }: { editor: FlowEditor; sheet: 
               </div>
             ) : null,
           )}
-        </div>
+        </div>}
       </div>
       {menu && <CellMenu ctx={ctx} {...menu} onClose={() => menuStore.set(null)} />}
     </div>
   );
 }
 
-function ColumnHeader({ col, width, onAdd }: { col: Column; width: number; onAdd: () => void }) {
+function ColumnHeader({ col, width, onAdd }: { col: Column; width: number; onAdd?: () => void }) {
   const startResize = (e: React.MouseEvent) => {
     e.preventDefault();
     const x0 = e.clientX;
@@ -121,14 +121,14 @@ function ColumnHeader({ col, width, onAdd }: { col: Column; width: number; onAdd
       <span className="h-3.5 w-1 shrink-0 rounded-full" style={{ background: col.side === 'aff' ? 'var(--aff)' : 'var(--con)' }} />
       <span className="truncate text-[12.5px] font-semibold">{col.label}</span>
       <span className="t3 font-mono text-[10.5px]">{col.short}</span>
-      <button
+      {onAdd && <button
         className="btn ml-auto !p-1 opacity-0 transition-opacity group-hover:opacity-100"
         title="New argument starting in this column"
         onMouseDown={(e) => e.preventDefault()}
         onClick={onAdd}
       >
         <Icon.plus s={14} />
-      </button>
+      </button>}
       <div className="absolute -right-[3px] top-0 z-10 h-full w-[6px] cursor-col-resize hover:bg-[var(--accent)]/40" onMouseDown={startResize} title="Drag to resize" />
     </div>
   );
@@ -146,11 +146,11 @@ const NodeView = memo(function NodeView({ id, level, ctx }: { id: string; level:
   const empty = !!n.get('empty');
   return (
     <div className="flex items-start">
-      {empty && width > 0 ? (
+      {empty && width > 0 && !ctx.editor.readOnly ? (
         <Slot width={width} label="+ add" title="Click to write in this column" onClick={() => ctx.editor.fillPlaceholder(id)} testid={'fill-' + level} />
       ) : (
         <div className="shrink-0 overflow-hidden" style={{ width }}>
-          {width === 0 ? null : <Cell id={id} n={n} level={level} ctx={ctx} />}
+          {width === 0 ? null : empty ? <div style={{ height: 4 }} /> : <Cell id={id} n={n} level={level} ctx={ctx} />}
         </div>
       )}
       {childIds.length > 0 ? (
@@ -160,7 +160,7 @@ const NodeView = memo(function NodeView({ id, level, ctx }: { id: string; level:
           ))}
         </div>
       ) : (
-        !empty && <RespondSlots id={id} level={level} ctx={ctx} />
+        !empty && !ctx.editor.readOnly && <RespondSlots id={id} level={level} ctx={ctx} />
       )}
     </div>
   );
@@ -290,8 +290,9 @@ function Cell({ id, n, level, ctx }: { id: string; n: Y.Map<any>; level: number;
     ta.parentElement?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
   }, [focused]);
 
+  const ro = editor.readOnly;
   const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.nativeEvent.isComposing) return;
+    if (e.nativeEvent.isComposing || ro) return;
     const ta = e.currentTarget;
     const mod = modKey(e);
     const k = e.key;
@@ -361,12 +362,13 @@ function Cell({ id, n, level, ctx }: { id: string; n: Y.Map<any>; level: number;
       className={cls('cell mx-1 my-[3px] px-2 py-[5px]', focused && 'focused', mark && `m-${mark}`, n.get('bold') && 'bold', n.get('crossed') && 'crossed')}
       onContextMenu={(e) => {
         e.preventDefault();
+        if (ro) return;
         editor.setFocus(id, 'keep');
         ctx.menu.set({ x: e.clientX, y: e.clientY, id });
       }}
       data-cell={id}
     >
-      {!isExt && (
+      {!isExt && !ro && (
         <div
           className="insert-line -top-[6px]"
           title="Insert cell above"
@@ -382,7 +384,7 @@ function Cell({ id, n, level, ctx }: { id: string; n: Y.Map<any>; level: number;
           ref={ref}
           rows={1}
           spellCheck={false}
-          readOnly={isExt}
+          readOnly={isExt || ro}
           placeholder={isExt ? 'extended' : level === 0 && isFirst ? 'Type here…' : ''}
           onInput={(e) => {
             const ta = e.currentTarget;
@@ -405,14 +407,14 @@ function Cell({ id, n, level, ctx }: { id: string; n: Y.Map<any>; level: number;
           onKeyDown={onKeyDown}
         />
       </div>
-      <div
+      {!ro && <div
         className="insert-line -bottom-[6px]"
         title="Insert cell below"
         onMouseDown={(e) => {
           e.preventDefault();
           editor.addSibling(id, 1);
         }}
-      />
+      />}
       {mark && (
         <span className="mark-chip" style={{ color: chipColor }}>
           {MARK_LABEL[mark]}

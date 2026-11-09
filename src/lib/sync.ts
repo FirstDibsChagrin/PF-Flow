@@ -7,6 +7,10 @@ import { fromBase64, toBase64 } from './util';
 import { Store } from './store';
 
 export const LOCAL = Symbol('local-edit'); // origin for user edits (undo-tracked)
+/** Cells created speculatively by a click; synced but not undo-tracked. */
+export const PROVISIONAL = Symbol('provisional');
+/** Bookkeeping writes (activity log, notices); synced but not undo-tracked or counted as edits. */
+export const SYSTEM = Symbol('system');
 const REMOTE = Symbol('remote');
 
 export type NetStatus = 'connecting' | 'online' | 'offline';

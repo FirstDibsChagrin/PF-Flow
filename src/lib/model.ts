@@ -115,8 +115,8 @@ export function txn<T>(d: Y.Doc, fn: () => T): T {
   return r;
 }
 
-export function addSheet(d: Y.Doc, name: string, kind: SheetKind, index?: number, withCell = true): string {
-  const id = newId();
+export function addSheet(d: Y.Doc, name: string, kind: SheetKind, index?: number, withCell = true, fixedId?: string): string {
+  const id = fixedId ?? newId();
   const s = new Y.Map<any>();
   s.set('name', name);
   s.set('kind', kind);
@@ -234,7 +234,52 @@ export function setText(d: Y.Doc, ytext: Y.Text, next: string) {
 }
 
 /** Deep-copy a whole flow document's content into another (used for templates & duplicate). */
-export function copyFlowContent(src: Y.Doc, dst: Y.Doc, opts: { name: string; mode?: Mode; kind: 'flow' | 'template' }) {
+/** Copy a sheet's cells (with fresh cell ids) from src into dst's sheet `dstSheet`, replacing what's there. */
+export function copySheetCells(src: Y.Doc, srcSheet: string, dst: Y.Doc, dstSheet: string) {
+  const sNodes = nodesMap(src);
+  const dNodes = nodesMap(dst);
+  const ds = sheetsMap(dst).get(dstSheet)!;
+  // clear the destination sheet
+  const doomed: string[] = [];
+  dNodes.forEach((n, id) => {
+    if (n.get('sheet') === dstSheet) doomed.push(id);
+  });
+  doomed.forEach((id) => dNodes.delete(id));
+  const dKids = ds.get('children') as Y.Array<string>;
+  if (dKids.length) dKids.delete(0, dKids.length);
+  const copyNode = (oldId: string, newParent: string): string | null => {
+    const n = sNodes.get(oldId);
+    if (!n) return null;
+    const id = newId();
+    const extra: Record<string, any> = {};
+    for (const k of ['mark', 'bold', 'crossed', 'empty', 'ext']) if (n.get(k)) extra[k] = n.get(k);
+    const nn = makeNode(newParent, dstSheet, (n.get('text') as Y.Text).toString(), extra);
+    dNodes.set(id, nn);
+    const kids: string[] = [];
+    for (const c of (n.get('children') as Y.Array<string>).toArray()) {
+      const nc = copyNode(c, id);
+      if (nc) kids.push(nc);
+    }
+    (nn.get('children') as Y.Array<string>).push(kids);
+    return id;
+  };
+  const kids: string[] = [];
+  for (const c of ((sheetsMap(src).get(srcSheet)?.get('children') as Y.Array<string>) ?? new Y.Array<string>()).toArray()) {
+    const nc = copyNode(c, rootOf(dstSheet));
+    if (nc) kids.push(nc);
+  }
+  dKids.push(kids);
+}
+
+/** Hooks so other modules (extensions, …) can copy their parts of a flow along with it. */
+export const contentCopiers: ((src: Y.Doc, dst: Y.Doc) => void)[] = [];
+
+/** Deep-copy a whole flow document's content into another (templates, duplicate, snapshots). */
+export function copyFlowContent(
+  src: Y.Doc,
+  dst: Y.Doc,
+  opts: { name: string; mode?: Mode; kind: 'flow' | 'template'; keepSheetIds?: boolean; extra?: boolean },
+) {
   const srcMode: Mode = meta(src).get('mode') || 'aff';
   dst.transact(() => {
     const m = meta(dst);
@@ -243,39 +288,14 @@ export function copyFlowContent(src: Y.Doc, dst: Y.Doc, opts: { name: string; mo
     m.set('kind', opts.kind);
     m.set('createdAt', Date.now());
     if (opts.kind === 'template') m.set('sourceMode', srcMode);
-    const idMap = new Map<string, string>();
-    const sNodes = nodesMap(src);
-    const dNodes = nodesMap(dst);
-    const copyNode = (oldId: string, newParent: string, sheet: string): string | null => {
-      const n = sNodes.get(oldId);
-      if (!n) return null;
-      const id = newId();
-      idMap.set(oldId, id);
-      const extra: Record<string, any> = {};
-      for (const k of ['mark', 'bold', 'crossed', 'empty', 'ext']) if (n.get(k)) extra[k] = n.get(k);
-      const nn = makeNode(newParent, sheet, (n.get('text') as Y.Text).toString(), extra);
-      dNodes.set(id, nn);
-      const kids: string[] = [];
-      for (const c of (n.get('children') as Y.Array<string>).toArray()) {
-        const nc = copyNode(c, id, sheet);
-        if (nc) kids.push(nc);
-      }
-      (nn.get('children') as Y.Array<string>).push(kids);
-      return id;
-    };
     for (const sid of sheetOrder(src).toArray()) {
       const s = sheetsMap(src).get(sid);
-      if (!s) continue;
-      const nsid = addSheet(dst, s.get('name'), s.get('kind'), undefined, false);
-      const ns = sheetsMap(dst).get(nsid)!;
-      ns.set('hidden', [...(s.get('hidden') || [])]);
-      const kids: string[] = [];
-      for (const c of (s.get('children') as Y.Array<string>).toArray()) {
-        const nc = copyNode(c, rootOf(nsid), nsid);
-        if (nc) kids.push(nc);
-      }
-      (ns.get('children') as Y.Array<string>).push(kids);
+      if (!s || sheetsMap(dst).has(sid) && opts.keepSheetIds) continue;
+      const nsid = addSheet(dst, s.get('name'), s.get('kind'), undefined, false, opts.keepSheetIds ? sid : undefined);
+      sheetsMap(dst).get(nsid)!.set('hidden', [...(s.get('hidden') || [])]);
+      copySheetCells(src, sid, dst, nsid);
     }
+    if (opts.extra !== false) for (const f of contentCopiers) f(src, dst);
   }, LOCAL);
 }
 

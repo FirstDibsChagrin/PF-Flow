@@ -7,7 +7,7 @@
 // }
 // Speaking order is NOT stored here: it is the flow's existing meta.mode.
 import * as Y from 'yjs';
-import { LOCAL } from './sync';
+import { LOCAL, SYSTEM } from './sync';
 import type { Side } from './model';
 
 export type Result = 'win' | 'loss' | 'pending';
@@ -33,7 +33,7 @@ export function roundText(d: Y.Doc, field: TextField): Y.Text {
   let t = m.get(field);
   if (!(t instanceof Y.Text)) {
     t = new Y.Text();
-    d.transact(() => m.set(field, t), LOCAL);
+    d.transact(() => m.set(field, t), SYSTEM);
     // a concurrent first-use by the partner may have won; always return the stored one
     t = m.get(field);
   }
@@ -73,5 +73,5 @@ export function ensureRoundFields(d: Y.Doc) {
   if (!missing.length) return;
   d.transact(() => {
     for (const f of missing) m.set(f, new Y.Text());
-  }, LOCAL);
+  }, SYSTEM);
 }

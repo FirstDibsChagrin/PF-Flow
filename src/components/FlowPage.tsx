@@ -21,6 +21,10 @@ import { currentFlow } from './SettingsPanel';
 import { RoundInfoPanel, RoundInfoSummary } from './RoundInfo';
 import { DOCK_ITEMS, DockStrip } from './Dock';
 import { DockPanels } from './DockPanels';
+import { PreviewView, previewStore } from './History';
+import { ActivityRecorder, AUTO_SNAPSHOT_MS, flushPendingSnapshots, lastSnapshotAt, saveSnapshot, type RestoreNotice } from '../lib/history';
+import { settings } from '../lib/settings';
+import { clientKey } from '../lib/sync';
 import { ensureRoundFields } from '../lib/round';
 import { useSettings } from '../lib/settings';
 import { useStore } from '../lib/store';
@@ -122,6 +126,47 @@ function FlowView({ editor, kind }: { editor: FlowEditor; kind: 'flow' | 'templa
 
   const timers = useTimerControls(doc, mode);
   const dockDots = useDockDots(editor);
+  const preview = useStore(previewStore);
+
+  // activity log + automatic versions (~every 5 min while edits are happening)
+  useEffect(() => {
+    if (kind !== 'flow') return;
+    const rec = new ActivityRecorder(
+      doc,
+      () => ({ name: settings.get().name || 'Someone', color: settings.get().color }),
+      () => editor.activeSheet.get(),
+    );
+    const room = editor.room;
+    if (!lastSnapshotAt(room)) localStorage.setItem(`pf.lastSnap.${room}`, String(Date.now()));
+    const tick = async () => {
+      flushPendingSnapshots();
+      if (!rec.dirtySince || Date.now() - lastSnapshotAt(room) < AUTO_SNAPSHOT_MS) return;
+      rec.flush();
+      rec.dirtySince = 0;
+      await saveSnapshot(room, doc, { name: null, kind: 'auto', by: settings.get().name || 'Someone' });
+    };
+    const iv = setInterval(tick, Math.min(30_000, AUTO_SNAPSHOT_MS / 2));
+    window.addEventListener('online', flushPendingSnapshots);
+    return () => {
+      clearInterval(iv);
+      window.removeEventListener('online', flushPendingSnapshots);
+      rec.destroy();
+      previewStore.get()?.doc.destroy();
+      previewStore.set(null);
+    };
+  }, [doc, kind]);
+
+  // tell me when my partner restores a version
+  useEffect(() => {
+    const opened = Date.now();
+    const h = (ev: import('yjs').YMapEvent<any>) => {
+      if (!ev.keysChanged.has('restoreNotice')) return;
+      const n = m.get('restoreNotice') as RestoreNotice | undefined;
+      if (n && n.client !== clientKey && n.at > opened - 5000) toast(`${n.by} ${n.text}`);
+    };
+    m.observe(h);
+    return () => m.unobserve(h);
+  }, [doc]);
 
   // global shortcuts
   const lastFocus = useRef<string | null>(null);
@@ -314,8 +359,14 @@ function FlowView({ editor, kind }: { editor: FlowEditor; kind: 'flow' | 'templa
       </header>
       <div className="flex min-h-0 flex-1">
         <div className="flex min-w-0 flex-1 flex-col">
-          <TabBar editor={editor} sheets={sheets} active={active} />
-          <div className="min-h-0 flex-1">{active && <Sheet key={active} editor={editor} sheet={active} presence={sync.presence} />}</div>
+          {preview ? (
+            <PreviewView live={editor} preview={preview} />
+          ) : (
+            <>
+              <TabBar editor={editor} sheets={sheets} active={active} />
+              <div className="min-h-0 flex-1">{active && <Sheet key={active} editor={editor} sheet={active} presence={sync.presence} />}</div>
+            </>
+          )}
         </div>
         {dock === 'round' && kind === 'flow' && <RoundInfoPanel doc={doc} mode={mode} onModeChange={switchMode} onClose={() => editor.dock.set(null)} />}
         {dock && dock !== 'round' && <DockPanels editor={editor} kind={kind} panel={dock} />}

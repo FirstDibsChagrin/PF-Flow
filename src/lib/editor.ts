@@ -1,7 +1,7 @@
 // Per-open-flow editing controller: focus, Flower-style navigation, cell actions, undo.
 import * as Y from 'yjs';
 import { Store } from './store';
-import { LOCAL, type DocSync } from './sync';
+import { LOCAL, PROVISIONAL, type DocSync } from './sync';
 import {
   childrenOf,
   deleteCell,
@@ -23,8 +23,6 @@ import {
   type SheetKind,
 } from './model';
 
-/** Origin for cells created speculatively (click/→ to the right of an argument). Not undo-tracked. */
-const PROVISIONAL = Symbol('provisional');
 
 export interface Focus {
   sheet: string | null;
