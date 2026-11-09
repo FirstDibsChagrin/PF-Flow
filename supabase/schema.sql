@@ -47,12 +47,14 @@ returns bigint
 language plpgsql security definer set search_path = public as $$
 declare new_id bigint;
 begin
-  if not exists(select 1 from rooms where code = p_code) then
-    raise exception 'room not found';
+  if p_code !~ '^[A-Z2-9]{8}$' then
+    raise exception 'invalid code';
   end if;
   if length(p_update) > 2000000 then
     raise exception 'update too large';
   end if;
+  -- codes generated while offline (or during a failed registration) are registered on first save
+  insert into rooms(code) values (p_code) on conflict (code) do nothing;
   insert into doc_updates(room_code, doc_id, update) values (p_code, p_doc, p_update)
   returning doc_updates.id into new_id;
   return new_id;
@@ -64,9 +66,10 @@ returns bigint
 language plpgsql security definer set search_path = public as $$
 declare new_id bigint;
 begin
-  if not exists(select 1 from rooms where code = p_code) then
-    raise exception 'room not found';
+  if p_code !~ '^[A-Z2-9]{8}$' then
+    raise exception 'invalid code';
   end if;
+  insert into rooms(code) values (p_code) on conflict (code) do nothing;
   insert into doc_updates(room_code, doc_id, update) values (p_code, p_doc, p_merged)
   returning doc_updates.id into new_id;
   delete from doc_updates where room_code = p_code and doc_id = p_doc and id = any(p_ids);
