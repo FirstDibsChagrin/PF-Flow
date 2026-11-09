@@ -42,7 +42,7 @@ export const clientKey = CLIENT_KEY;
 
 export class DocSync {
   doc = new Y.Doc();
-  idb: IndexeddbPersistence;
+  idb: IndexeddbPersistence | null = null;
   status = new Store<DocStatus>({ net: 'connecting', pending: false, loaded: false, serverSynced: false });
   presence = new Store<PresenceState[]>([]);
   loaded: Promise<void>;
@@ -58,9 +58,16 @@ export class DocSync {
   private myPresence: PresenceState | null = null;
 
   constructor(public room: string, public docId: string) {
-    this.idb = new IndexeddbPersistence(`pf:${room}:${docId}`, this.doc);
+    try {
+      this.idb = new IndexeddbPersistence(`pf:${room}:${docId}`, this.doc);
+    } catch (e) {
+      console.warn('[pf] local storage unavailable; working in memory', e);
+    }
     this.loaded = new Promise((res) => {
-      this.idb.once('synced', () => {
+      let done = false;
+      const finish = () => {
+        if (done) return;
+        done = true;
         // recover edits stashed synchronously during the last unload
         try {
           const k = this.stashKey;
@@ -72,7 +79,14 @@ export class DocSync {
         } catch {}
         this.setStatus({ loaded: true });
         res();
-      });
+      };
+      if (this.idb) this.idb.once('synced', finish);
+      else finish();
+      // never hang on a stuck/blocked IndexedDB: carry on in memory and let the server fill in
+      setTimeout(() => {
+        if (!done) console.warn('[pf] local storage slow to open', this.docId);
+        finish();
+      }, 4000);
     });
     window.addEventListener('pagehide', this.onHide);
     this.doc.on('update', this.onDocUpdate);
@@ -214,7 +228,7 @@ export class DocSync {
   };
 
   private onDocUpdate = (update: Uint8Array, origin: unknown) => {
-    if (origin === REMOTE || origin === this.idb) return;
+    if (origin === REMOTE || (this.idb && origin === this.idb)) return;
     // broadcast live (coalesced), then queue for durable storage
     this.outbox.push(update);
     if (!this.outTimer) this.outTimer = setTimeout(this.sendOutbox, 40);
@@ -360,7 +374,7 @@ export class DocSync {
     this.doc.off('update', this.onDocUpdate);
     // let IndexedDB finish writing before tearing down
     setTimeout(() => {
-      this.idb.destroy();
+      this.idb?.destroy();
       this.doc.destroy();
     }, 1000);
   }
