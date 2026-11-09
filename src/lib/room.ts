@@ -12,6 +12,7 @@ import { copyFlowContent, initFlowDoc, meta, sheetOrder, timersMap, type Mode } 
 import { transport } from './transport';
 import { fromBase64, isValidRoomCode, newId, newRoomCode } from './util';
 import { EMPTY_SUMMARY, readSummary, roundMap, type RoundSummary } from './round';
+import { ensureExt, homeFingerprint, replaceExt, setTemplateRef } from './ext';
 
 export type DocKind = 'flow' | 'template';
 export interface Entry {
@@ -161,10 +162,13 @@ export function updateEntry(id: string, patch: Partial<Entry>) {
 }
 
 // ---------- create / copy ----------
-async function fill(dst: Loc, opts: { name: string; mode: Mode; kind: DocKind; from?: Loc | null }) {
+async function fill(dst: Loc, opts: { name: string; mode: Mode; kind: DocKind; from?: Loc | null; template?: { id: string; name: string } | null }) {
+  const owner = opts.template ? await homeFingerprint(homeCode()) : '';
   const write = (d: Y.Doc, src?: Y.Doc) => {
     if (src) copyFlowContent(src, d, { name: opts.name, mode: opts.mode, kind: opts.kind });
     else initFlowDoc(d, opts.name, opts.mode, opts.kind);
+    ensureExt(d);
+    if (opts.template) setTemplateRef(d, { id: opts.template.id, owner, name: opts.template.name });
     if (opts.kind === 'flow') {
       const lengths = readDefaultTimes(homeIndex().doc);
       d.transact(() => timersMap(d).set('lengths', lengths), LOCAL);
@@ -179,7 +183,7 @@ async function fill(dst: Loc, opts: { name: string; mode: Mode; kind: DocKind; f
 }
 
 /** Create a new flow with its own share code. Returns the code. */
-export async function createFlow(opts: { name: string; mode: Mode; from?: Loc | null }): Promise<string> {
+export async function createFlow(opts: { name: string; mode: Mode; from?: Loc | null; template?: { id: string; name: string } | null }): Promise<string> {
   const code = newRoomCode();
   await registerRoom(code);
   await fill(flowLoc(code), { ...opts, kind: 'flow' });
@@ -341,4 +345,10 @@ export async function refreshFlowSummaries(entries: Entry[]) {
     }
   };
   for (let i = 0; i < todo.length; i += 4) await Promise.all(todo.slice(i, i + 4).map(work));
+}
+
+/** Overwrite one of MY templates' extensions with a flow's extensions. */
+export async function pushExtToTemplate(flow: Y.Doc, templateId: string) {
+  await withDoc(homeCode(), templateId, (s) => replaceExt(flow, s.doc));
+  updateEntry(templateId, { updatedAt: Date.now() });
 }

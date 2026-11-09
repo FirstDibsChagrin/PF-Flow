@@ -9,6 +9,7 @@ export interface LocalSettings {
   name: string;
   color: string;
   sound: boolean;
+  readFontSize: number; // extensions reading mode
 }
 
 export const USER_COLORS = ['#6366f1', '#f59e0b', '#10b981', '#ec4899', '#0ea5e9', '#ef4444'];
@@ -23,6 +24,7 @@ function load(): LocalSettings {
     name: '',
     color: USER_COLORS[Math.floor(Math.random() * 2)],
     sound: false,
+    readFontSize: 24,
   };
   try {
     const s = JSON.parse(localStorage.getItem(KEY) || '{}');

@@ -167,7 +167,7 @@ export function DocList({ kind }: { kind: DocKind }) {
       }
     },
     useTemplate: async (e: Entry) => {
-      const code = await createFlow({ name: `Round ${flowCount + 1}`, mode: e.mode, from: locOf(e) });
+      const code = await createFlow({ name: `Round ${flowCount + 1}`, mode: e.mode, from: locOf(e), template: { id: e.id, name: e.name } });
       nav(`/f/${code}`);
     },
   };
@@ -347,7 +347,7 @@ function NewFlowDialog({ templates, count, onClose }: { templates: Entry[]; coun
   const submit = async () => {
     if (busy) return;
     setBusy(true);
-    const code = await createFlow({ name: name.trim() || `Round ${count + 1}`, mode, from: tplEntry ? locOf(tplEntry) : null });
+    const code = await createFlow({ name: name.trim() || `Round ${count + 1}`, mode, from: tplEntry ? locOf(tplEntry) : null, template: tplEntry ? { id: tplEntry.id, name: tplEntry.name } : null });
     onClose();
     nav(`/f/${code}`);
   };
