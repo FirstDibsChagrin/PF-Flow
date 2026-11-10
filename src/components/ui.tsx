@@ -78,6 +78,15 @@ export const Icon = {
   pin: () => (
     <svg width="12" height="12" viewBox="0 0 24 24" {...P}><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12z" /></svg>
   ),
+  card: (p: { s?: number }) => (
+    <svg width={p.s ?? 16} height={p.s ?? 16} viewBox="0 0 24 24" {...P}><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z" /><path d="M14 3v5h5M9 13h6M9 17h4" /></svg>
+  ),
+  send: (p: { s?: number }) => (
+    <svg width={p.s ?? 16} height={p.s ?? 16} viewBox="0 0 24 24" {...P}><path d="M22 2L11 13M22 2l-7 20-4-9-9-4z" /></svg>
+  ),
+  check: (p: { s?: number }) => (
+    <svg width={p.s ?? 16} height={p.s ?? 16} viewBox="0 0 24 24" {...P} strokeWidth={2.6}><path d="M5 12.5l4.5 4.5L19 7.5" /></svg>
+  ),
   close: () => (
     <svg width="16" height="16" viewBox="0 0 24 24" {...P}><path d="M6 6l12 12M18 6L6 18" /></svg>
   ),

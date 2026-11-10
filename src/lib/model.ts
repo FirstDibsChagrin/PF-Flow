@@ -235,7 +235,7 @@ export function setText(d: Y.Doc, ytext: Y.Text, next: string) {
 
 /** Deep-copy a whole flow document's content into another (used for templates & duplicate). */
 /** Copy a sheet's cells (with fresh cell ids) from src into dst's sheet `dstSheet`, replacing what's there. */
-export function copySheetCells(src: Y.Doc, srcSheet: string, dst: Y.Doc, dstSheet: string) {
+export function copySheetCells(src: Y.Doc, srcSheet: string, dst: Y.Doc, dstSheet: string, includeCalls = true) {
   const sNodes = nodesMap(src);
   const dNodes = nodesMap(dst);
   const ds = sheetsMap(dst).get(dstSheet)!;
@@ -253,6 +253,14 @@ export function copySheetCells(src: Y.Doc, srcSheet: string, dst: Y.Doc, dstShee
     const id = newId();
     const extra: Record<string, any> = {};
     for (const k of ['mark', 'bold', 'crossed', 'empty', 'ext']) if (n.get(k)) extra[k] = n.get(k);
+    // evidence calls belong to one round: kept for snapshots/restore/duplicate, never for templates
+    if (includeCalls && n.get('call')) {
+      extra.call = n.get('call');
+      const note = new Y.Text();
+      const old = n.get('callNote');
+      if (old instanceof Y.Text && old.length) note.insert(0, old.toString());
+      extra.callNote = note;
+    }
     const nn = makeNode(newParent, dstSheet, (n.get('text') as Y.Text).toString(), extra);
     dNodes.set(id, nn);
     const kids: string[] = [];
@@ -281,6 +289,8 @@ export function copyFlowContent(
   opts: { name: string; mode?: Mode; kind: 'flow' | 'template'; keepSheetIds?: boolean; extra?: boolean },
 ) {
   const srcMode: Mode = meta(src).get('mode') || 'aff';
+  // Call-evidence marks never go into a template, nor from a template into a new flow.
+  const includeCalls = opts.kind === 'flow' && (meta(src).get('kind') ?? 'flow') !== 'template';
   dst.transact(() => {
     const m = meta(dst);
     m.set('name', opts.name);
@@ -293,7 +303,7 @@ export function copyFlowContent(
       if (!s || sheetsMap(dst).has(sid) && opts.keepSheetIds) continue;
       const nsid = addSheet(dst, s.get('name'), s.get('kind'), undefined, false, opts.keepSheetIds ? sid : undefined);
       sheetsMap(dst).get(nsid)!.set('hidden', [...(s.get('hidden') || [])]);
-      copySheetCells(src, sid, dst, nsid);
+      copySheetCells(src, sid, dst, nsid, includeCalls);
     }
     if (opts.extra !== false) for (const f of contentCopiers) f(src, dst);
   }, LOCAL);

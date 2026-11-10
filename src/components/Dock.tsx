@@ -8,6 +8,7 @@ const A = isMac ? '⌥' : 'Alt+';
 export const DOCK_ITEMS: { id: DockPanel; label: string; key: string; icon: () => JSX.Element; flowOnly?: boolean }[] = [
   { id: 'round', label: 'Round info', key: 'I', icon: Icon.info, flowOnly: true },
   { id: 'tracker', label: 'Drop/extend tracker', key: 'T', icon: Icon.tracker, flowOnly: true },
+  { id: 'evidence', label: 'Evidence calls', key: 'V', icon: () => <Icon.card />, flowOnly: true },
   { id: 'ext', label: 'Extensions', key: 'E', icon: Icon.book },
   { id: 'chat', label: 'Partner chat', key: 'M', icon: Icon.chat, flowOnly: true },
   { id: 'history', label: 'Version history', key: 'H', icon: Icon.history, flowOnly: true },

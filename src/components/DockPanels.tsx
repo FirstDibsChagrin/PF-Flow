@@ -4,11 +4,13 @@ import { HistoryPanel } from './History';
 import { ChatPanel } from './Chat';
 import { ExtensionsPanel } from './Extensions';
 import { TrackerPanel } from './Tracker';
+import { EvidencePanel } from './Evidence';
 
 export function DockPanels({ editor, kind, panel }: { editor: FlowEditor; kind: 'flow' | 'template'; panel: DockPanel }) {
   const close = () => editor.dock.set(null);
   if (panel === 'history') return <HistoryPanel editor={editor} onClose={close} />;
   if (panel === 'chat') return <ChatPanel editor={editor} onClose={close} />;
+  if (panel === 'evidence') return <EvidencePanel editor={editor} onClose={close} />;
   if (panel === 'tracker') return <TrackerPanel editor={editor} onClose={close} />;
   if (panel === 'ext') return <ExtensionsPanel editor={editor} kind={kind} onClose={close} />;
   return (

@@ -61,7 +61,7 @@ export function YTextInput(props: {
       autosize();
     };
     ytext.observe(obs);
-    if (props.autoFocus) setTimeout(() => el.focus(), 0);
+    if (props.autoFocus) el.focus(); // synchronously, so no keystroke lands in the previously focused cell
     return () => ytext.unobserve(obs);
   }, [ytext]);
   const p = {

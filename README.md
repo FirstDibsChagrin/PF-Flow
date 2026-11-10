@@ -72,7 +72,14 @@ npm run preview              # http://localhost:4173
   * If you click and leave without typing, nothing is left behind.
 * **Cells** work like Flower. A cell's responses sit in the next column on the same row, so a whole argument chain lines up horizontally.
 * **Marks:** dropped (red, struck through), extended (green), and turned (purple). Use Alt+1/2/3, or right-click a cell.
-* **Side panels:** the icon strip on the right edge of a flow opens Round info, the tracker, extensions, chat and history. Only one is open at a time, and the grid narrows to make room (it scrolls sideways as usual).
+* **Call evidence** (Alt+4, or right-click → Call evidence) flags a cell whose card you want to call.
+  * It's separate from Dropped/Extended/Turned, so a cell can be both, for example Extended and Call evidence. It shows as a small badge in the cell's top-left corner.
+  * Badge colors: amber = To call, blue = Called, green = Checked.
+  * Click the badge (or right-click → Evidence status & note…) to set the status and write a short note, such as "Smith 24, does it say Russia would actually attack?". Alt+Shift+4 cycles the status.
+  * The **Evidence calls** panel (Alt+V) lists every flagged cell by tab with its note and status. Filter by status or tick **Hide Checked**. Click an item to jump to the cell; click its status icon to cycle it.
+  * Calls sync live, merge offline, show in version history, and each change is its own undo step (your own only).
+  * Calls belong to one round: they're kept in versions and when you duplicate a flow, but never copied into a template or from a template into a new flow.
+* **Side panels:** the icon strip on the right edge of a flow opens Round info, the tracker, evidence calls, extensions, chat and history. Only one is open at a time, and the grid narrows to make room (it scrolls sideways as usual).
 * **Round info** (the ⓘ button in the flow header, or Alt+I) holds opponent, judge, tournament, round, my side, result, speaker points, ballot notes and judge feedback. It's synced live with your partner and merges character by character, like cells. Speaking order there is the same setting as the header toggle.
 * **Dashboard filters:** chips for my side, result, speaking order, tournament, judge and opponent (the last three list the values in your flows). Filters combine with AND, and a flow with no result counts as Pending. Search also matches opponent, judge, tournament and round. Cards show the key round info and pick up your partner's edits from the server.
 * **Undo/redo** only ever undoes *your own* edits (Yjs per-origin undo), so you can't undo your partner's work. Quick typing in a cell is one step; moving to another cell, or pausing, starts a new one. Restores from history are undoable too.
@@ -133,6 +140,8 @@ npm run preview              # http://localhost:4173
 | --- | --- |
 | Alt+1 / Alt+2 / Alt+3 | Mark dropped / extended / turned (press again to clear) |
 | Alt+0 | Clear mark |
+| Alt+4 | Call evidence on / off (independent of the other marks) |
+| Alt+Shift+4 | Evidence status: To call → Called → Checked |
 | Right-click | Cell menu |
 | Mod+B | Bold |
 | Mod+Shift+X | Cross out |
@@ -157,6 +166,7 @@ npm run preview              # http://localhost:4173
 | --- | --- |
 | Alt+I | Round info |
 | Alt+T | Drop/extend tracker |
+| Alt+V | Evidence calls |
 | Alt+E | Extensions (also in the template editor) |
 | Alt+M | Partner chat |
 | Alt+H | Version history |

@@ -2,6 +2,7 @@
 import * as Y from 'yjs';
 import { Store } from './store';
 import { LOCAL, PROVISIONAL, type DocSync } from './sync';
+import { cycleCall, setCall, toggleCall, type CallStatus } from './evidence';
 import {
   childrenOf,
   deleteCell,
@@ -29,7 +30,7 @@ export interface Focus {
   node: string | null;
 }
 
-export type DockPanel = 'round' | 'tracker' | 'chat' | 'ext' | 'history';
+export type DockPanel = 'round' | 'tracker' | 'evidence' | 'chat' | 'ext' | 'history';
 
 export class FlowEditor {
   doc: Y.Doc;
@@ -43,6 +44,8 @@ export class FlowEditor {
   lastCell = new Store<string | null>(null);
   /** chat: cell id -> attached message ids (set up by the flow page) */
   chatCells = new Store<Record<string, string[]>>({});
+  /** evidence-call popover anchored next to a cell's badge */
+  callPopover = new Store<{ id: string; x: number; y: number } | null>(null);
   /** chat: message to scroll to / highlight when the chat panel opens */
   chatTarget = new Store<string | null>(null);
   undo: Y.UndoManager;
@@ -421,6 +424,22 @@ export class FlowEditor {
       const sheet = this.activeSheet.get();
       if (sheet && liveChildren(this.doc, rootOf(sheet)).length === 0) this.addRow(sheet);
     }
+  }
+
+  /** Evidence-call edits are discrete undo steps (never merged with typing or each other). */
+  private step(f: () => void) {
+    this.undo.stopCapturing();
+    f();
+    this.undo.stopCapturing();
+  }
+  toggleCall(id: string) {
+    this.step(() => toggleCall(this.doc, id));
+  }
+  cycleCall(id: string) {
+    this.step(() => cycleCall(this.doc, id));
+  }
+  setCall(id: string, status: CallStatus | null) {
+    this.step(() => setCall(this.doc, id, status));
   }
 
   setMark(id: string, mark: Mark | null) {

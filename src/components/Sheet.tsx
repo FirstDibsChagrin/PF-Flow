@@ -7,6 +7,8 @@ import { Store, useStore } from '../lib/store';
 import type { PresenceState } from '../lib/sync';
 import { useY } from '../lib/yhooks';
 import { cls, modKey } from '../lib/util';
+import { CALL_LABEL, CALL_STATUSES, callNote, type CallStatus } from '../lib/evidence';
+import { YTextInput } from './RoundInfo';
 import { Icon, Menu, MenuItem, MenuSep } from './ui';
 
 interface Ctx {
@@ -32,6 +34,7 @@ export function Sheet({ editor, sheet, presence }: { editor: FlowEditor; sheet: 
   const colWidths = useSettings((s) => s.colWidths);
   const [menuStore] = useState(() => new Store<{ x: number; y: number; id: string } | null>(null));
   const menu = useStore(menuStore);
+  const pop = useStore(editor.callPopover);
 
   if (!sheetMap) return null;
   const columns = editor.columns(sheet);
@@ -94,6 +97,7 @@ export function Sheet({ editor, sheet, presence }: { editor: FlowEditor; sheet: 
         </div>}
       </div>
       {menu && <CellMenu ctx={ctx} {...menu} onClose={() => menuStore.set(null)} />}
+      {pop && getNode(doc, pop.id)?.get('call') && <CallPopover editor={editor} {...pop} onClose={() => editor.callPopover.set(null)} />}
     </div>
   );
 }
@@ -233,6 +237,7 @@ function Cell({ id, n, level, ctx }: { id: string; n: Y.Map<any>; level: number;
   const isExt = !!n.get('ext');
   const chatIds = useStore(editor.chatCells, (c) => (c[id] ? c[id].join(',') : ''));
   const flashing = useStore(editor.flash, (f) => f === id);
+  const call = n.get('call') as CallStatus | undefined;
 
   const autosize = () => {
     const ta = ref.current;
@@ -341,6 +346,12 @@ function Cell({ id, n, level, ctx }: { id: string; n: Y.Map<any>; level: number;
     if (mod && !e.shiftKey && k.toLowerCase() === 'e') return done(), void editor.extend(id);
     if (mod && !e.shiftKey && k.toLowerCase() === 'b') return done(), editor.toggle(id, 'bold');
     if (mod && e.shiftKey && k.toLowerCase() === 'x') return done(), editor.toggle(id, 'crossed');
+    if (e.altKey && !mod && e.nativeEvent.code === 'Digit4') {
+      done();
+      if (e.shiftKey) editor.cycleCall(id);
+      else editor.toggleCall(id);
+      return;
+    }
     if (e.altKey && !mod && !e.shiftKey && /^Digit[0-3]$/.test(e.nativeEvent.code)) {
       done();
       const m = ({ Digit1: 'dropped', Digit2: 'extended', Digit3: 'turned', Digit0: null } as Record<string, Mark | null>)[e.nativeEvent.code];
@@ -432,6 +443,23 @@ function Cell({ id, n, level, ctx }: { id: string; n: Y.Map<any>; level: number;
           <Icon.pin />
         </button>
       )}
+      {call && (
+        <button
+          className={cls('call-badge', `call-${call}`)}
+          title={`Call evidence: ${CALL_LABEL[call]}${callNote(doc, id)?.length ? ` — ${callNote(doc, id)}` : ''} (click for status and note)`}
+          onMouseDown={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            if (ro) return;
+            const r = e.currentTarget.getBoundingClientRect();
+            editor.callPopover.set({ id, x: r.left, y: r.bottom + 6 });
+          }}
+          data-testid="call-badge"
+          data-status={call}
+        >
+          {call === 'checked' ? <Icon.check s={10} /> : call === 'called' ? <Icon.send s={10} /> : <Icon.card s={10} />}
+        </button>
+      )}
       {mark && (
         <span className="mark-chip" style={{ color: chipColor }}>
           {MARK_LABEL[mark]}
@@ -475,6 +503,22 @@ function CellMenu({ ctx, x, y, id, onClose }: { ctx: Ctx; x: number; y: number; 
         </MenuItem>
       )}
       <MenuSep />
+      <MenuItem onClick={run(() => editor.toggleCall(id))} hint={`${A}4`} active={!!n.get('call')}>
+        <span className="text-[var(--call)]"><Icon.card s={13} /></span>
+        Call evidence
+      </MenuItem>
+      {n.get('call') && (
+        <MenuItem
+          onClick={run(() => {
+            const el = document.querySelector(`[data-cell="${id}"] [data-testid=call-badge]`)?.getBoundingClientRect();
+            editor.callPopover.set({ id, x: el?.left ?? x, y: (el?.bottom ?? y) + 6 });
+          })}
+          hint={`${A}⇧4 cycles`}
+        >
+          Evidence status & note…
+        </MenuItem>
+      )}
+      <MenuSep />
       <MenuItem onClick={run(() => editor.addChild(id))} hint="⇧↵">
         Add response
       </MenuItem>
@@ -498,6 +542,60 @@ function CellMenu({ ctx, x, y, id, onClose }: { ctx: Ctx; x: number; y: number; 
       <MenuItem danger onClick={run(() => editor.remove(id))} hint={`${M}⌫`}>
         Delete cell{liveChildren(editor.doc, id).length ? ' + responses' : ''}
       </MenuItem>
+    </Menu>
+  );
+}
+
+/** Small popover from a cell's evidence badge: status + short note. */
+function CallPopover({ editor, id, x, y, onClose }: { editor: FlowEditor; id: string; x: number; y: number; onClose: () => void }) {
+  const doc = editor.doc;
+  const n = getNode(doc, id)!;
+  useY(n);
+  const status = n.get('call') as CallStatus;
+  const note = callNote(doc, id);
+  return (
+    <Menu x={x} y={y} onClose={onClose}>
+      <div className="w-[280px] p-1.5" data-testid="call-popover">
+        <div className="mb-2 flex items-center gap-1.5 text-[12.5px] font-semibold">
+          <span className="text-[var(--call)]"><Icon.card s={14} /></span>
+          Call evidence
+        </div>
+        <div className="mb-2 flex rounded-lg border bd p-0.5 text-[12px] font-medium">
+          {CALL_STATUSES.map((s) => (
+            <button
+              key={s}
+              className={cls('flex-1 rounded-md px-2 py-1 transition-colors', status === s ? `call-pill call-${s}` : 't2 hover:bg-[var(--hover-bg)]')}
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => editor.setCall(id, s)}
+              data-testid={`call-set-${s}`}
+            >
+              {CALL_LABEL[s]}
+            </button>
+          ))}
+        </div>
+        {note && (
+          <YTextInput
+            doc={doc}
+            ytext={note}
+            placeholder="Card / author / what to check"
+            className="input !py-1.5 text-[12.5px]"
+            testid="call-note"
+            autoFocus
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                onClose();
+              }
+            }}
+          />
+        )}
+        <div className="mt-2 flex justify-between">
+          <button className="btn !px-1.5 !py-0.5 text-[12px] text-red-500" onClick={() => (editor.setCall(id, null), onClose())} data-testid="call-remove">
+            Remove call
+          </button>
+          <span className="t3 self-center text-[11px]">Enter to close</span>
+        </div>
+      </div>
     </Menu>
   );
 }

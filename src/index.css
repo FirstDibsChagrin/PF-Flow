@@ -27,6 +27,9 @@
   --ext-bg: rgba(5, 150, 105, 0.11);
   --turn: #7c3aed;
   --turn-bg: rgba(124, 58, 237, 0.11);
+  --call: #d97706;
+  --call-called: #2563eb;
+  --call-checked: #059669;
   color-scheme: light;
 }
 .dark {
@@ -53,6 +56,9 @@
   --ext-bg: rgba(52, 211, 153, 0.12);
   --turn: #a78bfa;
   --turn-bg: rgba(167, 139, 250, 0.15);
+  --call: #fbbf24;
+  --call-called: #60a5fa;
+  --call-checked: #34d399;
   color-scheme: dark;
 }
 
@@ -216,7 +222,7 @@ body {
 .remote-tag {
   position: absolute;
   top: -9px;
-  left: 6px;
+  left: 20px; /* leaves the top-left corner for the evidence badge */
   font-size: 10px;
   line-height: 14px;
   padding: 0 5px;
@@ -380,4 +386,43 @@ body {
 button.trk-chip:not(:disabled):hover {
   filter: brightness(0.95);
   cursor: pointer;
+}
+
+/* evidence call badge (top-left corner, stays visible over any mark tint) */
+.call-badge {
+  position: absolute;
+  top: -6px;
+  left: -5px;
+  z-index: 6;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 5px;
+  box-shadow: 0 0 0 2px var(--panel);
+  cursor: pointer;
+  transition: transform 100ms;
+}
+.call-badge:hover {
+  transform: scale(1.12);
+}
+.call-badge.call-todo,
+.call-pill.call-todo {
+  background: var(--call);
+  color: #fff;
+}
+.call-badge.call-called,
+.call-pill.call-called {
+  background: var(--call-called);
+  color: #fff;
+}
+.call-badge.call-checked,
+.call-pill.call-checked {
+  background: var(--call-checked);
+  color: #fff;
+}
+.dark .call-badge,
+.dark .call-pill {
+  color: #0f1115 !important;
 }
