@@ -5,6 +5,7 @@ import { IndexeddbPersistence } from 'y-indexeddb';
 import { transport, type Channel } from './transport';
 import { fromBase64, toBase64 } from './util';
 import { Store } from './store';
+import { PresenceMonitor, type PeerView, type PresenceEvent } from './presenceMonitor';
 
 export const LOCAL = Symbol('local-edit'); // origin for user edits (undo-tracked)
 /** Cells created speculatively by a click; synced but not undo-tracked. */
@@ -43,6 +44,23 @@ const CLIENT_KEY = (() => {
   }
 })();
 export const clientKey = CLIENT_KEY;
+
+/** Stable per-device id, so a partner who reloads is the same person (not a leave + a join). */
+const DEVICE_ID = (() => {
+  try {
+    let k = localStorage.getItem('pf.deviceId');
+    if (!k) {
+      k = Math.random().toString(36).slice(2, 12);
+      localStorage.setItem('pf.deviceId', k);
+    }
+    return k;
+  } catch {
+    return CLIENT_KEY;
+  }
+})();
+export const deviceId = DEVICE_ID;
+const HEARTBEAT_MS = 4000;
+const STALE_MS = 12_000; // a visible partner silent this long is treated as dropped
 
 export class DocSync {
   doc = new Y.Doc();
@@ -94,15 +112,85 @@ export class DocSync {
     });
     window.addEventListener('pagehide', this.onHide);
     this.doc.on('update', this.onDocUpdate);
+    this.monitor.setSelfOnline(false); // not connected yet: collect partners silently once we are
     this.connect();
     window.addEventListener('online', this.onOnline);
     window.addEventListener('offline', this.onOffline);
     document.addEventListener('visibilitychange', this.onVisible);
     this.pollTimer = setInterval(() => {
       if (document.visibilityState === 'visible') this.pull(Date.now() - this.lastFull > 120_000);
-      this.sendCursor(); // heartbeat so partners keep seeing us
       this.publishPresence(); // expire peers we stopped hearing from
     }, 10_000);
+    let lastBeat = 0;
+    this.heartbeat = setInterval(() => {
+      if (Date.now() - lastBeat >= HEARTBEAT_MS) {
+        lastBeat = Date.now();
+        this.sendCursor(); // heartbeat so partners keep seeing us (and can tell if we drop)
+      }
+      this.checkStale();
+      this.monitor.tick();
+    }, 1000);
+    this.monitor.subscribe(() => {
+      this.peers.set(this.monitor.snapshot());
+      this.savePeers();
+    });
+    this.peers.set(this.monitor.snapshot());
+  }
+
+  // ---------- partner join/leave (builds on the presence signals below) ----------
+  /** Partners as the header shows them: present / reconnecting / leaving / away (+ last seen). */
+  peers = new Store<PeerView[]>([]);
+  private presenceListeners = new Set<(e: PresenceEvent) => void>();
+  onPresenceEvent(f: (e: PresenceEvent) => void) {
+    this.presenceListeners.add(f);
+    return () => this.presenceListeners.delete(f);
+  }
+  private get peersKey() {
+    return `pf.peers.${this.room}.${this.docId}`;
+  }
+  private savePeers() {
+    try {
+      // remember partners per flow so "last seen" survives reloads
+      localStorage.setItem(this.peersKey, JSON.stringify(this.monitor.snapshot().map((p) => ({ ...p, status: 'away' }))));
+    } catch {}
+  }
+  monitor = new PresenceMonitor(
+    () => Date.now(),
+    (e) => this.presenceListeners.forEach((f) => f(e)),
+    (() => {
+      try {
+        return JSON.parse(localStorage.getItem(`pf.peers.${this.room}.${this.docId}`) || '[]');
+      } catch {
+        return [];
+      }
+    })(),
+  );
+  private heartbeat: any = null;
+  private lastHeard = new Map<string, { at: number; visible: boolean }>(); // by device
+  private devOfKey = new Map<string, string>(); // presence key / client -> device
+  private presentDevs = new Set<string>();
+  private byeAt = new Map<string, number>();
+  private infoOf = new Map<string, { name: string; color: string }>();
+
+  private heardFrom(dev: string, visible: boolean | undefined, info?: { name?: string; color?: string }) {
+    if (dev === DEVICE_ID) return;
+    const prev = this.lastHeard.get(dev);
+    this.lastHeard.set(dev, { at: Date.now(), visible: visible ?? prev?.visible ?? true });
+    if (info?.name) this.infoOf.set(dev, { name: info.name, color: info.color ?? '#888' });
+    const known = this.infoOf.get(dev);
+    if (known) this.monitor.present(dev, known);
+  }
+  private checkStale() {
+    const now = Date.now();
+    for (const [dev, h] of this.lastHeard) {
+      // A visible partner sends a heartbeat every 4 s, so silence means a dropped connection
+      // (Presence itself can take much longer to notice). Hidden tabs get their timers throttled
+      // by the browser, so those are judged by Presence membership only.
+      if (h.visible && now - h.at > STALE_MS) this.monitor.gone(dev);
+    }
+  }
+  private updateSelfOnline() {
+    this.monitor.setSelfOnline(this.joined && navigator.onLine);
   }
 
   private setStatus(p: Partial<DocStatus>) {
@@ -152,14 +240,28 @@ export class DocSync {
       onMessage: this.onMessage,
       onPresence: (states) => {
         this.members.clear();
+        const devs = new Set<string>();
         for (const [k, arr] of Object.entries(states)) {
           const s = (arr as any[])[0];
-          if (s && k !== CLIENT_KEY) this.members.set(k, { name: s.name, color: s.color });
+          if (!s || k === CLIENT_KEY) continue;
+          this.members.set(k, { name: s.name, color: s.color });
+          const dev = s.dev || k;
+          if (dev === DEVICE_ID) continue;
+          this.devOfKey.set(k, dev);
+          devs.add(dev);
+          this.infoOf.set(dev, { name: s.name, color: s.color });
         }
+        for (const dev of devs) if (!this.presentDevs.has(dev)) this.heardFrom(dev, undefined);
+        for (const dev of this.presentDevs) {
+          // dropped from Presence without saying goodbye -> connection loss (debounced in the monitor)
+          if (!devs.has(dev) && Date.now() - (this.byeAt.get(dev) ?? 0) > 8000) this.monitor.gone(dev);
+        }
+        this.presentDevs = devs;
         this.publishPresence();
       },
       onStatus: (s) => {
         this.joined = s === 'connected';
+        this.updateSelfOnline();
         if (s === 'connected') {
           this.backoff = 1000;
           this.setStatus({ net: 'online' });
@@ -183,7 +285,7 @@ export class DocSync {
     this.memberTimer = setTimeout(() => {
       this.memberTimer = null;
       if (!this.myPresence) return;
-      const m = { name: this.myPresence.name, color: this.myPresence.color };
+      const m = { name: this.myPresence.name, color: this.myPresence.color, dev: DEVICE_ID };
       const key = JSON.stringify(m);
       if (key === this.lastMember) return;
       this.lastMember = key;
@@ -197,7 +299,17 @@ export class DocSync {
     this.cursorTimer = setTimeout(() => {
       this.cursorTimer = null;
       const p = this.myPresence;
-      if (p) this.ch?.send({ t: 'cur', from: CLIENT_KEY, name: p.name, color: p.color, sheet: p.sheet ?? null, node: p.node ?? null });
+      if (p)
+        this.ch?.send({
+          t: 'cur',
+          from: CLIENT_KEY,
+          dev: DEVICE_ID,
+          vis: document.visibilityState === 'visible',
+          name: p.name,
+          color: p.color,
+          sheet: p.sheet ?? null,
+          node: p.node ?? null,
+        });
     }, 60);
   }
 
@@ -211,7 +323,7 @@ export class DocSync {
     return `pf.stash.${this.room}.${this.docId}`;
   }
   private onHide = () => {
-    this.ch?.send({ t: 'bye', from: CLIENT_KEY });
+    this.ch?.send({ t: 'bye', from: CLIENT_KEY, dev: DEVICE_ID });
     if (!this.queue.length) return;
     const merged = Y.mergeUpdates(this.queue);
     const b64 = toBase64(merged);
@@ -222,13 +334,18 @@ export class DocSync {
   };
 
   private onOnline = () => {
+    this.updateSelfOnline();
     this.setStatus({ net: 'connecting' });
     this.fullSync();
     this.scheduleReconnect();
   };
-  private onOffline = () => this.setStatus({ net: 'offline' });
+  private onOffline = () => {
+    this.setStatus({ net: 'offline' });
+    this.updateSelfOnline();
+  };
   private onVisible = () => {
     if (document.visibilityState === 'visible') this.pull(false);
+    this.sendCursor(); // tell partners we're hidden/visible right away
   };
 
   private onDocUpdate = (update: Uint8Array, origin: unknown) => {
@@ -259,13 +376,23 @@ export class DocSync {
 
   private onMessage = (msg: any) => {
     if (!msg || msg.from === CLIENT_KEY) return;
+    const dev: string | undefined = msg.dev ?? this.devOfKey.get(msg.from);
     if (msg.t === 'cur') {
       this.cursors.set(msg.from, { sheet: msg.sheet, node: msg.node });
       if (msg.name) this.heard.set(msg.from, { name: msg.name, color: msg.color, at: Date.now() });
+      if (dev) {
+        this.devOfKey.set(msg.from, dev);
+        this.heardFrom(dev, msg.vis, msg);
+      }
       this.publishPresence();
     } else if (msg.t === 'bye') {
       this.heard.delete(msg.from);
       this.cursors.delete(msg.from);
+      if (dev && dev !== DEVICE_ID) {
+        this.byeAt.set(dev, Date.now());
+        this.lastHeard.delete(dev);
+        this.monitor.bye(dev);
+      }
       this.publishPresence();
     } else if (msg.t === 'u') {
       Y.applyUpdate(this.doc, fromBase64(msg.d), REMOTE);
@@ -372,7 +499,8 @@ export class DocSync {
     window.removeEventListener('offline', this.onOffline);
     window.removeEventListener('pagehide', this.onHide);
     document.removeEventListener('visibilitychange', this.onVisible);
-    this.ch?.send({ t: 'bye', from: CLIENT_KEY });
+    this.ch?.send({ t: 'bye', from: CLIENT_KEY, dev: DEVICE_ID });
+    clearInterval(this.heartbeat);
     const ch = this.ch;
     setTimeout(() => ch?.close(), 200);
     this.doc.off('update', this.onDocUpdate);

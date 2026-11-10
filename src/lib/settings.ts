@@ -10,6 +10,8 @@ export interface LocalSettings {
   color: string;
   sound: boolean;
   readFontSize: number; // extensions reading mode
+  notifyPresence: boolean; // toast when my partner joins/leaves
+  presenceSound: boolean; // soft sound with those toasts
 }
 
 export const USER_COLORS = ['#6366f1', '#f59e0b', '#10b981', '#ec4899', '#0ea5e9', '#ef4444'];
@@ -25,6 +27,8 @@ function load(): LocalSettings {
     color: USER_COLORS[Math.floor(Math.random() * 2)],
     sound: false,
     readFontSize: 24,
+    notifyPresence: true,
+    presenceSound: false,
   };
   try {
     const s = JSON.parse(localStorage.getItem(KEY) || '{}');

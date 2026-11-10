@@ -2,7 +2,7 @@ import { useEffect } from 'react';
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
 import { DocList } from './components/Room';
 import { FlowPage } from './components/FlowPage';
-import { DialogHost, ToastHost } from './components/ui';
+import { DialogHost, PresenceToastHost, ToastHost } from './components/ui';
 import { ShortcutsHost } from './components/Shortcuts';
 import { SettingsHost } from './components/SettingsPanel';
 import { NamePrompt } from './components/NamePrompt';
@@ -36,6 +36,7 @@ export default function App() {
       </Routes>
       <DialogHost />
       <ToastHost />
+      <PresenceToastHost />
       <ShortcutsHost />
       <SettingsHost />
       <NamePrompt />

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Store, useStore } from '../lib/store';
 import { cls } from '../lib/util';
-import type { DocStatus, PresenceState } from '../lib/sync';
+import type { DocStatus } from '../lib/sync';
 
 // ---------- icons (inline, stroke-based) ----------
 const P = { fill: 'none', stroke: 'currentColor', strokeWidth: 1.8, strokeLinecap: 'round', strokeLinejoin: 'round' } as const;
@@ -238,7 +238,7 @@ export function StatusPill({ status, local, compact }: { status: DocStatus; loca
   );
 }
 
-export function Avatar({ name, color, title }: { name: string; color: string; title?: string }) {
+export function Avatar({ name, color, title, state }: { name: string; color: string; title?: string; state?: 'present' | 'reconnecting' | 'away' | 'unknown' }) {
   const initials = (name || '?')
     .split(/\s+/)
     .map((s) => s[0])
@@ -247,21 +247,50 @@ export function Avatar({ name, color, title }: { name: string; color: string; ti
     .toUpperCase();
   return (
     <div
-      className="flex h-7 w-7 items-center justify-center rounded-full text-[11px] font-semibold text-white ring-2"
-      style={{ background: color, ['--tw-ring-color' as any]: 'var(--panel)' }}
+      className={cls('avatar relative flex h-7 w-7 items-center justify-center rounded-full text-[11px] font-semibold text-white ring-2', state && state !== 'present' && `avatar-${state}`)}
+      style={{ background: color, ['--tw-ring-color' as any]: 'var(--panel)', ['--av' as any]: color }}
       title={title ?? name}
+      data-state={state ?? 'present'}
     >
       {initials}
     </div>
   );
 }
 
-export function Presence({ me, others }: { me: { name: string; color: string }; others: PresenceState[] }) {
+export interface PeerAvatar {
+  id: string;
+  name: string;
+  color: string;
+  state: 'present' | 'reconnecting' | 'away' | 'unknown';
+  title: string;
+}
+export function Presence({ me, meOffline, peers }: { me: { name: string; color: string }; meOffline?: boolean; peers: PeerAvatar[] }) {
   return (
     <div className="flex items-center -space-x-1.5" data-testid="presence">
-      <Avatar name={me.name} color={me.color} title={`${me.name} (you)`} />
-      {others.map((o) => (
-        <Avatar key={o.id} name={o.name} color={o.color} />
+      <Avatar name={me.name} color={me.color} state={meOffline ? 'away' : 'present'} title={meOffline ? `${me.name} (you, offline: changes are saved on this device)` : `${me.name} (you)`} />
+      {peers.map((o) => (
+        <Avatar key={o.id} name={o.name} color={o.color} state={o.state} title={o.title} />
+      ))}
+    </div>
+  );
+}
+
+// ---------- partner join/leave toasts (top-right, never focusable, never block input) ----------
+const presenceToasts = new Store<{ id: number; text: string; color: string }[]>([]);
+export function presenceToast(text: string, color: string) {
+  const id = Math.random();
+  presenceToasts.set((t) => [...t.slice(-2), { id, text, color }]);
+  setTimeout(() => presenceToasts.set((t) => t.filter((x) => x.id !== id)), 4000);
+}
+export function PresenceToastHost() {
+  const list = useStore(presenceToasts);
+  return (
+    <div className="pointer-events-none fixed right-14 top-14 z-[45] flex flex-col items-end gap-1.5" role="status" aria-live="polite" data-testid="presence-toasts">
+      {list.map((t) => (
+        <div key={t.id} className="panel fadein flex items-center gap-2 rounded-lg px-3 py-1.5 text-[12.5px] shadow-md" data-testid="presence-toast">
+          <span className="h-2 w-2 rounded-full" style={{ background: t.color }} />
+          {t.text}
+        </div>
       ))}
     </div>
   );

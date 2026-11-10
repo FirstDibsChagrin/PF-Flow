@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { FlowEditor } from '../lib/editor';
 import {
@@ -35,7 +35,7 @@ import { useY } from '../lib/yhooks';
 import { cls, modKey } from '../lib/util';
 import { Sheet } from './Sheet';
 import { TimerBar, useTimerControls } from './TimerBar';
-import { confirmDialog, Icon, Menu, MenuItem, MenuSep, Presence, promptDialog, StatusPill, toast } from './ui';
+import { confirmDialog, Icon, Menu, MenuItem, MenuSep, Presence, presenceToast, promptDialog, StatusPill, toast } from './ui';
 import { openShortcuts } from './Shortcuts';
 import { openSettings } from './SettingsPanel';
 
@@ -77,7 +77,6 @@ function FlowView({ editor, kind }: { editor: FlowEditor; kind: 'flow' | 'templa
   useY(sheetOrder(doc));
   useY(sheetsMap(doc), true);
   const status = useStore(sync.status);
-  const others = useStore(sync.presence);
   const meName = useSettings((s) => s.name);
   const meColor = useSettings((s) => s.color);
   const sheets = editor.sheets();
@@ -120,12 +119,51 @@ function FlowView({ editor, kind }: { editor: FlowEditor; kind: 'flow' | 'templa
   }, [focus.node, focus.sheet, active, meName, meColor]);
 
   // remote presence might pick same color: display partner with a contrasting color
-  const othersShown = useMemo(
-    () => others.map((o) => ({ ...o, color: partnerColor(o.color, meColor, o.id) })),
-    [others, meColor],
-  );
 
   const timers = useTimerControls(doc, mode);
+
+  // partner join/leave: avatar states + toasts (built on the presence layer in sync.ts)
+  const peers = useStore(sync.peers);
+  const selfOffline = status.net !== 'online';
+  const [, rerender] = useState(0);
+  useEffect(() => {
+    const iv = setInterval(() => rerender((x) => x + 1), 30_000); // keep "last seen" fresh
+    return () => clearInterval(iv);
+  }, []);
+  const peerAvatars = peers
+    .filter((p) => kind === 'flow' || p.status !== 'away')
+    .map((p) => {
+      const color = partnerColor(p.color, meColor, p.id);
+      if (selfOffline)
+        return { id: p.id, name: p.name, color, state: 'unknown' as const, title: `${p.name}: unknown, you're offline` };
+      if (p.status === 'reconnecting') return { id: p.id, name: p.name, color, state: 'reconnecting' as const, title: `${p.name} is reconnecting…` };
+      if (p.status === 'away') return { id: p.id, name: p.name, color, state: 'away' as const, title: `${p.name}: last seen ${lastSeenText(p.lastSeen)}` };
+      return { id: p.id, name: p.name, color, state: 'present' as const, title: `${p.name} is here` };
+    });
+  useEffect(() => {
+    const off = sync.onPresenceEvent((e) => {
+        const s = settings.get();
+        if (!s.notifyPresence) return;
+        const n = e.peer.name || 'Your partner';
+        const text =
+          e.type === 'joined'
+            ? e.whileAway
+              ? `${n} joined while you were offline`
+              : `${n} joined`
+            : e.type === 'left'
+              ? e.whileAway
+                ? `${n} left while you were offline`
+                : `${n} left`
+              : e.type === 'lost'
+                ? `${n} lost connection`
+                : `${n} reconnected`;
+        presenceToast(text, partnerColor(e.peer.color, s.color, e.peer.id));
+        if (s.presenceSound) softChime(e.type === 'joined' || e.type === 'reconnected');
+    });
+    return () => {
+      off();
+    };
+  }, [sync]);
   const dockDots = useDockDots(editor);
   const preview = useStore(previewStore);
 
@@ -357,7 +395,7 @@ function FlowView({ editor, kind }: { editor: FlowEditor; kind: 'flow' | 'templa
             </button>
           )}
           <StatusPill status={status} local={transport.kind === 'local'} compact />
-          <Presence me={{ name: meName, color: meColor }} others={othersShown} />
+          <Presence me={{ name: meName, color: meColor }} meOffline={selfOffline} peers={peerAvatars} />
           {kind === 'flow' && (
             <button className="btn btn-outline" onClick={saveAsTemplate} title="Save current flow as template">
               <Icon.template /> <span className="hidden 2xl:inline">Save as template</span>
@@ -536,4 +574,35 @@ function TabBar({ editor, sheets, active }: { editor: FlowEditor; sheets: string
       )}
     </div>
   );
+}
+
+function lastSeenText(at: number): string {
+  const s = Math.max(0, Math.round((Date.now() - at) / 1000));
+  if (s < 60) return 'just now';
+  const m = Math.round(s / 60);
+  if (m < 60) return `${m} min ago`;
+  const h = Math.round(m / 60);
+  if (h < 24) return `${h} h ago`;
+  return new Date(at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+}
+
+let chimeCtx: AudioContext | null = null;
+/** Soft two-note cue (rising = joined/reconnected, falling = left/lost). */
+function softChime(up: boolean) {
+  try {
+    chimeCtx ??= new AudioContext();
+    const t = chimeCtx.currentTime;
+    (up ? [523.25, 659.25] : [659.25, 523.25]).forEach((f, i) => {
+      const o = chimeCtx!.createOscillator();
+      const g = chimeCtx!.createGain();
+      o.type = 'sine';
+      o.frequency.value = f;
+      g.gain.setValueAtTime(0.0001, t + i * 0.14);
+      g.gain.exponentialRampToValueAtTime(0.06, t + i * 0.14 + 0.02);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + i * 0.14 + 0.22);
+      o.connect(g).connect(chimeCtx!.destination);
+      o.start(t + i * 0.14);
+      o.stop(t + i * 0.14 + 0.25);
+    });
+  } catch {}
 }

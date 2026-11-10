@@ -75,6 +75,12 @@ function SettingsBody() {
           Reset widths
         </button>
       </Row>
+      <Row label="Notify when my partner joins or leaves" hint="A small note in the top-right corner">
+        <input type="checkbox" checked={s.notifyPresence} onChange={(e) => patchSettings({ notifyPresence: e.target.checked })} className="h-4 w-4 accent-[var(--accent)]" data-testid="set-notify" />
+      </Row>
+      <Row label="Sound for partner join/leave" hint="A soft chime with those notes">
+        <input type="checkbox" checked={s.presenceSound} disabled={!s.notifyPresence} onChange={(e) => patchSettings({ presenceSound: e.target.checked })} className="h-4 w-4 accent-[var(--accent)]" data-testid="set-presence-sound" />
+      </Row>
       <Row label="Timer sound" hint="Beep when a timer runs out">
         <input type="checkbox" checked={s.sound} onChange={(e) => patchSettings({ sound: e.target.checked })} className="h-4 w-4 accent-[var(--accent)]" />
       </Row>
