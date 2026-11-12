@@ -326,7 +326,9 @@ function mirrorRound(id: string, sum: RoundSummary) {
 const lastPeek = new Map<string, number>();
 export async function refreshFlowSummaries(entries: Entry[]) {
   if (!navigator.onLine || transport.kind !== 'supabase') return;
-  const todo = entries.filter((e) => e.kind === 'flow' && e.code && Date.now() - (lastPeek.get(e.id) ?? 0) > 60_000);
+  // once per 10 min per flow, and only flows touched in the last two weeks (old rounds don't change)
+  const recent = Date.now() - 14 * 24 * 3600_000;
+  const todo = entries.filter((e) => e.kind === 'flow' && e.code && e.updatedAt > recent && Date.now() - (lastPeek.get(e.id) ?? 0) > 10 * 60_000);
   const work = async (e: Entry) => {
     lastPeek.set(e.id, Date.now());
     try {

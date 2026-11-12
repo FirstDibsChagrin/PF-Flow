@@ -4,7 +4,7 @@ import type { FlowEditor } from '../lib/editor';
 import { liveChildren, meta, nodesMap, rootOf, sheetsMap, type Mark } from '../lib/model';
 import { LOCAL } from '../lib/sync';
 import { analyzeSheet, visibleArgs, type Chip, type TItem, type TNode, type TSheet } from '../lib/tracker';
-import { useY } from '../lib/yhooks';
+import { useY, useYThrottled } from '../lib/yhooks';
 import { cls } from '../lib/util';
 import { DockFrame } from './Dock';
 import { YTextInput } from './RoundInfo';
@@ -128,7 +128,7 @@ function ItemRow({ it, editor, small }: { it: TItem; editor: FlowEditor; small?:
 
 export function TrackerPanel({ editor, onClose }: { editor: FlowEditor; onClose: () => void }) {
   const doc = editor.doc;
-  useY(nodesMap(doc), true);
+  useYThrottled(nodesMap(doc)); // re-scan at most every 200 ms, not on every keystroke
   useY(sheetsMap(doc), true);
   useY(meta(doc));
   const [showAll, setShowAll] = useState(() => sessionStorage.getItem('pf.trk.all') === '1');

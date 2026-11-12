@@ -6,7 +6,7 @@
 // - snapshots: clean (history-free) copies of the flow content, stored server-side
 //   (table flow_snapshots, retention enforced by pf_save_snapshot). Offline saves queue locally.
 import * as Y from 'yjs';
-import { LOCAL, PROVISIONAL, SYSTEM } from './sync';
+import { LOCAL, SYSTEM } from './sync';
 import { transport, type SnapshotMeta } from './transport';
 import {
   addSheet,
@@ -86,7 +86,8 @@ export class ActivityRecorder {
   }
 
   private onTx = (tr: Y.Transaction) => {
-    if (tr.origin !== LOCAL && tr.origin !== PROVISIONAL) return;
+    // PROVISIONAL = cells a click created/cleaned up automatically; typing in them is LOCAL and counted
+    if (tr.origin !== LOCAL) return;
     const d = this.d;
     const nodes = nodesMap(d);
     let touched = false;
@@ -226,18 +227,30 @@ function writePending(xs: Pending[]) {
 export function pendingSnapshots(room: string) {
   return readPending().filter((p) => p.room === room);
 }
+let flushingSnaps = false;
 export async function flushPendingSnapshots() {
+  if (flushingSnaps) return; // called from every tick and 'online': never upload the same one twice
   const xs = readPending();
   if (!xs.length || !navigator.onLine) return;
-  const left: Pending[] = [];
+  flushingSnaps = true;
+  try {
+    await uploadPending(xs);
+  } finally {
+    flushingSnaps = false;
+  }
+}
+async function uploadPending(xs: Pending[]) {
+  const done = new Set<string>();
   for (const p of xs) {
     try {
       await transport.saveSnapshot(p.room, { name: p.name, kind: p.kind, by: p.by, summary: p.summary, data: p.data });
+      done.add(`${p.room}:${p.at}`);
     } catch {
-      left.push(p);
+      /* stays queued */
     }
   }
-  writePending(left);
+  // re-read: something may have been queued while we were uploading
+  writePending(readPending().filter((p) => !done.has(`${p.room}:${p.at}`)));
 }
 
 const lastSnapKey = (room: string) => `pf.lastSnap.${room}`;
@@ -252,7 +265,11 @@ export async function saveSnapshot(room: string, d: Y.Doc, opts: { name: string 
   const input = { name: opts.name, kind: opts.kind, by: opts.by, summary, data: snapshotData(d) };
   try {
     const id = await transport.saveSnapshot(room, input);
-    if (id == null) return 'skipped';
+    if (id == null) {
+      // partner saved one moments ago: don't retry (and re-upload) until the next interval
+      localStorage.setItem(lastSnapKey(room), String(Date.now()));
+      return 'skipped';
+    }
     localStorage.setItem(lastSnapKey(room), String(Date.now()));
     return 'saved';
   } catch {

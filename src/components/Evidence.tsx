@@ -3,7 +3,7 @@ import * as Y from 'yjs';
 import type { FlowEditor } from '../lib/editor';
 import { CALL_LABEL, CALL_STATUSES, type CallStatus } from '../lib/evidence';
 import { levelOf, liveChildren, nodesMap, rootOf, sheetsMap } from '../lib/model';
-import { useY } from '../lib/yhooks';
+import { useY, useYThrottled } from '../lib/yhooks';
 import { cls } from '../lib/util';
 import { DockFrame } from './Dock';
 import { Icon } from './ui';
@@ -52,7 +52,7 @@ function loadPrefs(): { status: CallStatus | null; hideChecked: boolean } {
 
 export function EvidencePanel({ editor, onClose }: { editor: FlowEditor; onClose: () => void }) {
   const doc = editor.doc;
-  useY(nodesMap(doc), true);
+  useYThrottled(nodesMap(doc)); // re-scan at most every 200 ms, not on every keystroke
   useY(sheetsMap(doc), true);
   const [prefs, setPrefsState] = useState(loadPrefs);
   const setPrefs = (p: Partial<typeof prefs>) => {
@@ -60,13 +60,13 @@ export function EvidencePanel({ editor, onClose }: { editor: FlowEditor; onClose
     setPrefsState(next);
     sessionStorage.setItem(PREF, JSON.stringify(next));
   };
-  const groups = editor.sheets().map((s) => ({
-    sheet: s,
-    name: sheetsMap(doc).get(s)?.get('name') ?? 'Tab',
-    items: callsInSheet(editor, s).filter((it) => (!prefs.status || it.status === prefs.status) && !(prefs.hideChecked && it.status === 'checked')),
+  const all = editor.sheets().map((s) => ({ sheet: s, name: sheetsMap(doc).get(s)?.get('name') ?? 'Tab', items: callsInSheet(editor, s) }));
+  const groups = all.map((g) => ({
+    ...g,
+    items: g.items.filter((it) => (!prefs.status || it.status === prefs.status) && !(prefs.hideChecked && it.status === 'checked')),
   }));
   const total = groups.reduce((a, g) => a + g.items.length, 0);
-  const anyMarked = editor.sheets().some((s) => callsInSheet(editor, s).length > 0);
+  const anyMarked = all.some((g) => g.items.length > 0);
 
   return (
     <DockFrame

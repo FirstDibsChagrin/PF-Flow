@@ -58,6 +58,7 @@ export function FlowPage({ kind }: { kind: 'flow' | 'template' }) {
       unbind();
       ed.destroy();
       currentFlow.set(null);
+      sync.leave(); // partner sees me leave now, not when the cached doc is torn down 30 s later
       releaseDoc(room, docId);
     };
   }, [room, docId]);
@@ -124,7 +125,8 @@ function FlowView({ editor, kind }: { editor: FlowEditor; kind: 'flow' | 'templa
 
   // partner join/leave: avatar states + toasts (built on the presence layer in sync.ts)
   const peers = useStore(sync.peers);
-  const selfOffline = status.net !== 'online';
+  const selfOffline = status.net === 'offline';
+  const connecting = status.net === 'connecting';
   const [, rerender] = useState(0);
   useEffect(() => {
     const iv = setInterval(() => rerender((x) => x + 1), 30_000); // keep "last seen" fresh
@@ -136,6 +138,7 @@ function FlowView({ editor, kind }: { editor: FlowEditor; kind: 'flow' | 'templa
       const color = partnerColor(p.color, meColor, p.id);
       if (selfOffline)
         return { id: p.id, name: p.name, color, state: 'unknown' as const, title: `${p.name}: unknown, you're offline` };
+      if (connecting) return { id: p.id, name: p.name, color, state: 'unknown' as const, title: `${p.name}: connecting…` };
       if (p.status === 'reconnecting') return { id: p.id, name: p.name, color, state: 'reconnecting' as const, title: `${p.name} is reconnecting…` };
       if (p.status === 'away') return { id: p.id, name: p.name, color, state: 'away' as const, title: `${p.name}: last seen ${lastSeenText(p.lastSeen)}` };
       return { id: p.id, name: p.name, color, state: 'present' as const, title: `${p.name} is here` };

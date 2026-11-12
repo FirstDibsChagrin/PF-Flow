@@ -11,6 +11,7 @@ export interface ChannelHandlers {
 export interface Channel {
   send(msg: any): Promise<boolean>;
   track(state: any): void;
+  untrack(): void;
   close(): void;
 }
 export interface UpdateRow {
@@ -129,7 +130,7 @@ class SupabaseTransport implements Transport {
     } catch (e) {
       console.error('[pf] realtime unavailable', e);
       setTimeout(() => h.onStatus('disconnected'), 0);
-      return { send: async () => false, track: () => {}, close: () => {} };
+      return { send: async () => false, track: () => {}, untrack: () => {}, close: () => {} };
     }
   }
 
@@ -180,6 +181,10 @@ class SupabaseTransport implements Transport {
       track: (state) => {
         lastTrack = state;
         doTrack();
+      },
+      untrack: () => {
+        lastTrack = null;
+        if (ch && joined) ch.untrack().catch(() => {});
       },
       close: () => {
         if (ch) this.sb.removeChannel(ch);
@@ -297,6 +302,11 @@ class LocalTransport implements Transport {
       track: (state) => {
         mine = state;
         bc.postMessage({ t: 'pres', key: presenceKey, state, ask: true });
+        emit();
+      },
+      untrack: () => {
+        mine = null;
+        bc.postMessage({ t: 'pres', key: presenceKey, state: null });
         emit();
       },
       close: () => {

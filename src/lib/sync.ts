@@ -73,6 +73,7 @@ export class DocSync {
   private queue: Uint8Array[] = [];
   private flushTimer: any = null;
   private flushing = false;
+  private flushBackoff = 2000;
   private lastId = 0;
   private pollTimer: any = null;
   private destroyed = false;
@@ -313,6 +314,15 @@ export class DocSync {
     }, 60);
   }
 
+  /** Stop announcing myself in this flow right away (navigating elsewhere in the app). */
+  leave() {
+    if (!this.myPresence) return;
+    this.ch?.send({ t: 'bye', from: CLIENT_KEY, dev: DEVICE_ID });
+    this.myPresence = null;
+    this.lastMember = '';
+    this.ch?.untrack();
+  }
+
   track(state: Omit<PresenceState, 'id'>) {
     this.myPresence = { ...state, id: CLIENT_KEY };
     this.sendMember();
@@ -417,19 +427,24 @@ export class DocSync {
     this.flushing = true;
     const batch = this.queue;
     this.queue = [];
+    let failed = false;
     try {
       const merged = Y.mergeUpdates(batch);
       await transport.pushUpdate(this.room, this.docId, toBase64(merged));
+      this.flushBackoff = 2000;
       if (this.queue.length === 0) this.setStatus({ pending: false });
       if (this.status.get().net !== 'online' && this.joined) this.setStatus({ net: 'online' });
     } catch {
       // keep for retry; full sync on reconnect will also reconcile via state vectors
       this.queue = batch.concat(this.queue);
       if (!navigator.onLine) this.setStatus({ net: 'offline' });
-      setTimeout(() => this.scheduleFlush(0), 4000);
+      failed = true;
+      // back off (2 s -> 30 s) instead of hammering a failing server
+      setTimeout(() => this.scheduleFlush(0), this.flushBackoff);
+      this.flushBackoff = Math.min(this.flushBackoff * 2, 30_000);
     } finally {
       this.flushing = false;
-      if (this.queue.length) this.scheduleFlush();
+      if (!failed && this.queue.length) this.scheduleFlush();
     }
   }
 

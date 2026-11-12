@@ -25,3 +25,24 @@ export function useYValue<T>(t: Y.AbstractType<any> | null | undefined, get: () 
     get,
   );
 }
+
+/** Like useY(t, deep) but re-renders at most every `ms` (for panels that re-scan the whole flow). */
+export function useYThrottled(t: Y.AbstractType<any> | null | undefined, ms = 200) {
+  const [, bump] = useReducer((x: number) => x + 1, 0);
+  useEffect(() => {
+    if (!t) return;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const h = () => {
+      if (timer) return;
+      timer = setTimeout(() => {
+        timer = null;
+        bump();
+      }, ms);
+    };
+    t.observeDeep(h);
+    return () => {
+      t.unobserveDeep(h);
+      if (timer) clearTimeout(timer);
+    };
+  }, [t, ms]);
+}

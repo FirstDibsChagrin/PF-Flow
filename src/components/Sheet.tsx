@@ -35,6 +35,8 @@ export function Sheet({ editor, sheet, presence }: { editor: FlowEditor; sheet: 
   const [menuStore] = useState(() => new Store<{ x: number; y: number; id: string } | null>(null));
   const menu = useStore(menuStore);
   const pop = useStore(editor.callPopover);
+  // the evidence popover belongs to this tab: close it when the tab changes or unmounts
+  useEffect(() => () => editor.callPopover.set(null), [editor]);
 
   if (!sheetMap) return null;
   const columns = editor.columns(sheet);
